@@ -4,6 +4,7 @@
     python monitor.py conv [horas]   # conversión por versión del modelo vs sistema antiguo (def. 1 h)
     python monitor.py latency [min]  # fiabilidad: a tiempo vs fallback (missing/late/invalid) y latencias
     python monitor.py lag [seg]      # cuánto tarda una request en aparecer en shop.requests (def. 20 s)
+    python monitor.py lb [min]       # LA MEDIDA BUENA: conversión esperada por versión según el leaderboard (def. 60 min)
     python monitor.py all            # check + conv + latency
 
 Lee TEAM_ID y RAWTREE_API_KEY de .env.
@@ -158,7 +159,45 @@ def lag(seconds: int = 20) -> None:
     print("(depende también de que el reloj del portátil esté en hora)")
 
 
-COMMANDS = {"check": check, "conv": conv, "latency": latency, "lag": lag}
+# --------------------------------------------------------------------------- lb
+LEADERBOARD = "https://datathon.rawtree.dev/api/state?by=model"
+
+
+def leaderboard(minutes: int = 60) -> tuple[dict, dict | None]:
+    """Datos públicos del leaderboard por versión del modelo, para una ventana de 15 a 180 minutos.
+
+    Es la medida que puntúa: compras ESPERADAS por 100 requests, calculadas con la probabilidad de compra
+    del simulador para lo que enseñó cada versión, no con las compras reales. Por eso tiene muchísimo menos
+    ruido que `conv` (que cuenta compras reales): con ~1.500 requests por versión ya distingue un 10 %.
+    Solo se pueden comparar versiones dentro de la MISMA ventana (el tráfico cambia a lo largo del día)."""
+    import urllib.request
+    span = min(max(int(minutes) * 60, 900), 10800)
+    to = int(time.time()) // 300 * 300
+    req = urllib.request.Request(f"{LEADERBOARD}&from={to - span}&to={to}", headers={"User-Agent": "datathon-client"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        d = json.load(r)
+    return d, next((t for t in d["teams"] if t["team_id"] == TEAM), None)
+
+
+def lb(minutes: int = 60) -> None:
+    d, me = leaderboard(minutes)
+    hhmm = lambda t: dt.datetime.fromtimestamp(t).strftime("%H:%M")
+    ranked = sorted(d["teams"], key=lambda t: -t["conversion"])
+    print(f"\nLeaderboard, ventana {hhmm(d['window'][0])}–{hhmm(d['window'][1])} (conversión ESPERADA, la que puntúa)")
+    print(f"  baseline {d['baseline']['conversion']:.3f} % | referencia de los organizadores {d['reference']['conversion']:.3f} % | "
+          f"mejor equipo {ranked[0]['conversion']:.3f} % ({ranked[0]['team_id']})")
+    if me is None:
+        print(f"  {TEAM} no aparece en esta ventana")
+        return
+    pos = 1 + sum(t["conversion"] > me["conversion"] for t in d["teams"])
+    print(f"  {TEAM}: {me['conversion']:.3f} % (puesto {pos} de {len(d['teams'])} por conversión) | cold {me['cold_conversion']:.3f} % | a tiempo {me['on_time']:.1f} %")
+    print(f"  {'versión':<22}{'requests':>10}{'conv %':>9}{'cold %':>9}{'€/req':>8}")
+    for v in sorted(me.get("versions", []), key=lambda v: -v["requests"]):
+        print(f"  {v['model_version']:<22}{v['requests']:>10}{v['conversion']:>9.3f}{v['cold_conversion']:>9.3f}{v['revenue_per_request']:>8.3f}")
+    print("  Con menos de ~1.000 requests por versión, diferencias de 0,15 puntos aún pueden ser ruido.")
+
+
+COMMANDS = {"check": check, "conv": conv, "latency": latency, "lag": lag, "lb": lb}
 
 if __name__ == "__main__":
     cmd, *args = sys.argv[1:] or ["all"]

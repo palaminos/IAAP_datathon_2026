@@ -90,6 +90,18 @@ GROUP BY v ORDER BY v""", timeout=300)
                 p = (b1 + b2) / (n1 + n2)
                 z = (b2 / n2 - b1 / n1) / math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2))
                 say(f"- {x['v']} vs {base['v']}, {label}: {100 * (b2 / n2) / (b1 / n1) - 100:+.0f} % (z = {z:+.2f})")
+# ---------------------------------------------------------------- leaderboard (la medida que puntúa, con poco ruido)
+try:
+    from monitor import leaderboard
+    for minutes in (30, 180):
+        d, me = leaderboard(minutes)
+        hhmm = lambda t: dt.datetime.fromtimestamp(t).strftime("%H:%M")
+        if me:
+            vs = " | ".join(f"{v['model_version']} {v['conversion']:.3f} % ({v['requests']} req)"
+                            for v in sorted(me.get("versions", []), key=lambda v: -v["requests"]) if v["requests"] >= 200)
+            say(f"- leaderboard {hhmm(d['window'][0])}–{hhmm(d['window'][1])} (conversión esperada): {vs} | referencia {d['reference']['conversion']:.3f} %")
+except Exception as e:
+    say(f"- leaderboard no disponible: {e!r}")
 say()
 if "--quiet" not in sys.argv:
     REPORT.parent.mkdir(exist_ok=True)

@@ -61,10 +61,12 @@ DRY_RUN = "--dry-run" in sys.argv
 # para el mismo comprador). La clave es la etiqueta model_version que muestra `monitor.py conv`.
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
-    "v9-organic": 30,       # v8 + señal orgánica (GBM entrenado con las vistas de la tienda, train_organic.py)
     "v6-similar-users": 30, # control: v4 + "usuarios parecidos" + carrito sin compra / visto sin carrito
-    "v7-explore": 40,       # sortea 10 entre los 40 mejores de v9 para aprender (solo en práctica: NO para la final)
-    # "v8-new-products": 0, # v6 reentrenado con más feedback + señal de producto nuevo (tope 0,4). v9 lo incluye
+    "v8-new-products": 30,  # v6 reentrenado con más feedback + señal de producto nuevo (tope 0,4), sin las 2 redundantes
+    "v7-explore": 40,       # sortea 10 entre los 40 mejores de v6 para aprender (solo en práctica: NO para la final)
+    # "v9-organic": 0,      # v8 + señal orgánica (GBM de vistas orgánicas). PERDIÓ en vivo según el leaderboard:
+    #                         1,17 % de conversión esperada frente a 1,45 % de v6 (y 1,22 % vs 1,83 % en cold),
+    #                         pese a predecir mejor offline (AUC 0,86 vs 0,80). No usar.
     # "v4-live-weights": 0, # v3 con pesos corregidos con el feedback en vivo. Empató con v6 en vivo (1,76 % vs
     #                         1,77 %) y queda por debajo en la validación temporal (AUC 0,871 vs 0,886)
     # "v5-cart-first": 0,   # v4 + carritos abandonados arriba del todo: PERDIÓ contra v4 en vivo
@@ -76,7 +78,7 @@ VARIANTS: dict[str, int] = {
 }
 
 # Exploración (variantes cuyo nombre acaba en "-explore")
-EXPLORE_BASE = "v9"      # parte de las puntuaciones de esta versión
+EXPLORE_BASE = "v6"      # parte de las puntuaciones de esta versión
 EXPLORE_TOP = 40         # candidatos entre los que se sortea
 EXPLORE_T = 1.0          # temperatura: 1 = cada candidato sale en proporción a su probabilidad estimada de compra
 EXPLORE_DRAWS = 300      # sorteos extra para estimar la probabilidad de cada producto en cada puesto
