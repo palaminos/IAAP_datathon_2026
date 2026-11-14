@@ -126,10 +126,12 @@ class Items:
         self.mfV = None
         if mf is not None:
             self.mfV = np.zeros((n, mf["k"]), np.float32)
+            self.mf_known = np.zeros(n, bool)   # productos con factores (los lanzados durante el evento no tienen)
             for pid, v in mf["V"].items():
                 i = PRODUCTS.idx.get(pid)
                 if i is not None:
-                    self.mfV[i] = v
+                    self.mfV[i], self.mf_known[i] = v, True
+            self.mf_sub_n = np.bincount(self.sub[self.mf_known], minlength=self.nsub).astype(np.float64)
 
 
 class UserStore:
@@ -308,10 +310,19 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
                         F[i, FI["cart_no_buy" if a else "viewed_no_cart"]] = 1.0
         if users.mf is not None and items.mfV is not None and row < len(users.mf):
             vec = users.mf[row]
-            if vec.any():
+            known = items.mf_known
+            if vec.any() and known.any():
                 aff = items.mfV @ vec
+                mu, sd = float(aff[known].mean()), float(aff[known].std()) + 1e-9
+                if not known.all():
+                    # Un producto nuevo no tiene factores: su afinidad saldría 0, por debajo de casi todo, y el
+                    # modelo lo enterraba (v6 enseñaba productos nuevos 4 veces menos de lo que se venden).
+                    # Se le supone la afinidad media que este usuario tiene por su subcategoría.
+                    sub_sum = np.bincount(items.sub[known], weights=aff[known], minlength=items.nsub)
+                    sub_mean = np.where(items.mf_sub_n > 0, sub_sum / np.maximum(items.mf_sub_n, 1), mu)
+                    aff = np.where(known, aff, sub_mean[items.sub])
                 F[:, FI["mf"]] = aff
-                F[:, FI["mf_z"]] = (aff - aff.mean()) / (aff.std() + 1e-9)
+                F[:, FI["mf_z"]] = (aff - mu) / sd
 
     idx = [PRODUCTS.idx.get(v["product_id"]) for v in recent_views or []]
     idx = [i for i in idx if i is not None and i < n]
