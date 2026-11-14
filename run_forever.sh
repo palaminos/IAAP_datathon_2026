@@ -40,6 +40,6 @@ trap 'echo; echo "Parado a mano: $(date "+%F %T")" | tee -a "$LOG"; exit 0' INT 
 while true; do
     echo "=== $(date "+%F %T") arrancando $SCRIPT ===" | tee -a "$LOG"
     caffeinate -is "$PYTHON" -u "$SCRIPT" 2>&1 | tee -a "$LOG"
-    echo "=== $(date "+%F %T") $SCRIPT se ha parado; reinicio en 5 s ===" | tee -a "$LOG"
-    sleep 5
+    echo "=== $(date "+%F %T") $SCRIPT se ha parado; reinicio en 2 s ===" | tee -a "$LOG"
+    sleep 2
 done

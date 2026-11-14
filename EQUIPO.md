@@ -65,6 +65,24 @@ Preguntas para el EDA (corto y dirigido: cada hallazgo debe acabar en una señal
 Dónde va cada cosa: notebooks de exploración en `notebooks/`, evaluación en `evaluation/`,
 material de la presentación en `docs/`.
 
+## Desplegar en producción
+
+Producción corre en UN solo portátil, en la carpeta `rawtree-prod` (copia de la rama que se despliega),
+con `./run_forever.sh` en una terminal que no se toca. En esa carpeta **no se edita nada**.
+
+Para poner una versión nueva, desde OTRA terminal:
+
+```bash
+cd ~/Desktop/Q5/Datathon/rawtree-prod
+./deploy.sh                # prueba origin/tarre sin enviar nada y, si pasa, la despliega y reinicia
+./deploy.sh --rollback     # vuelve a la versión anterior
+```
+
+Si la prueba falla o hay ficheros editados a mano, no toca producción. Para parar producción: Ctrl+C
+(nunca Ctrl+Z, que solo la pausa y luego duplica respuestas).
+
+Tests rápidos sin credenciales: `python -m unittest discover -s tests -v`.
+
 ## Cómo trabajamos con git
 
 - `main` = lo que está (o va a estar) en producción. Solo se cambia cuando una mejora está probada.

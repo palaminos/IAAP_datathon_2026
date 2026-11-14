@@ -2,6 +2,7 @@
 
     python recommender.py              # producción: responde y envía (usad ./run_forever.sh)
     python recommender.py --dry-run    # prueba: hace todo igual pero NO envía nada
+    python recommender.py --preflight  # comprueba que cada variante responde bien a 100 requests reales y sale
 
 Dos modelos conviven y se reparten los compradores (test A/B, ver VARIANTS):
   * v1: reglas a mano: co-vistas + populares de la subcategoría/categoría de lo que acaba de ver.
@@ -87,7 +88,16 @@ def push(answers: list[Record]) -> None:
     """Inserción por lotes en team_NN.submissions."""
     if DRY_RUN:
         return
-    http.post(f"{API}/v1/tables/submissions", params={"database": TEAM}, json=answers, timeout=10).raise_for_status()
+    # Hasta 3 intentos cortos: una respuesta que tarda más de 3 s ya no vale, así que no tiene sentido
+    # esperar 10 s a un envío colgado. Si un intento se escribió pero no nos llegó la confirmación, el
+    # reintento duplica la fila con la misma lista: no pasa nada, solo cuenta una.
+    for attempt in (1, 2, 3):
+        try:
+            http.post(f"{API}/v1/tables/submissions", params={"database": TEAM}, json=answers, timeout=4).raise_for_status()
+            return
+        except Exception as e:
+            print(f"envío fallido (intento {attempt} de 3, {len(answers)} respuestas): {e!r}")
+    raise RuntimeError(f"{len(answers)} respuestas perdidas: RawTree no aceptó el envío")
 
 
 # --------------------------------------------------------------------------- SQL
@@ -165,6 +175,13 @@ FROM {team}.feedback AS f INNER JOIN shop.requests AS r ON r.request_id::String 
 WHERE f.purchased != '' AND f.ts::DateTime64(3) > '{since}'
 ORDER BY ts"""
 """Lo que los usuarios nos han comprado a través del carrusel (para no volver a recomendárselo)."""
+
+DUPLICATES = """
+SELECT countIf(c > 1) AS dup, count() AS total FROM (
+    SELECT request_id::String AS rid, count() AS c FROM {team}.submissions
+    WHERE request_id::String IN (SELECT request_id::String FROM shop.requests WHERE ts::DateTime64(3) > now() - INTERVAL 2 MINUTE)
+    GROUP BY rid)"""
+"""Requests de los últimos 2 minutos con más de una respuesta: señal de que hay otro recomendador enviando."""
 
 NEW_EVENTS = """
 SELECT user_id::String AS u, product_id::String AS p, event_type::String AS t, toString(ts::DateTime64(3)) AS ts
@@ -361,6 +378,8 @@ class Background:
         self.users = UserStore()
         self.users_ready = False
         self.feedback_watermark = "2000-01-01 00:00:00"   # último feedback con compra ya incorporado
+        self.stock_ok = time.time()                        # última comprobación de stock que funcionó
+        self.started = time.time()
 
     def start(self) -> None:
         threading.Thread(target=self._stock_loop, daemon=True).start()
@@ -370,8 +389,11 @@ class Background:
         while True:
             try:
                 self.blocked = {p for p, last in stock_changes().items() if last == "out_of_stock"}
+                self.stock_ok = time.time()
             except Exception as e:
-                print(f"comprobación de stock fallida: {e}")
+                stale = time.time() - self.stock_ok
+                print(f"comprobación de stock fallida: {e}" + (
+                    f" | AVISO: la lista de agotados tiene {stale:.0f} s; riesgo de respuestas inválidas" if stale > 30 else ""))
             time.sleep(STOCK_S)
 
     def _load_users(self) -> None:
@@ -424,23 +446,83 @@ class Background:
                 n = self._update_users()
                 print(f"refresco en {time.time() - t:.1f}s: {len(self.state.available)} productos disponibles, "
                       f"{n} eventos nuevos, {len(self.users.row)} usuarios en memoria")
+                if not DRY_RUN and time.time() - self.started > 180:  # tras un relevo, dejar pasar la ventana
+                    d = query(DUPLICATES.format(team=TEAM), timeout=20)[0]
+                    if int(d["dup"]) > 5:
+                        print(f"!!! AVISO: {d['dup']} de {d['total']} requests recientes tienen DOS respuestas: hay OTRO "
+                              f"recomendador enviando (¿otro portátil?). Solo debe correr uno: parad el otro.")
             except Exception as e:
                 print(f"refresco fallido, sigo con el estado anterior: {e}")
 
 
+@dataclass
+class Models:
+    """Lo que no cambia mientras corre el proceso: co-vistas y pesos."""
+    coviews: dict
+    coviews_idx: dict
+    weights: Any = None        # model_weights.json (histórico)
+    weights_live: Any = None   # model_weights_live.json (corregidos con el feedback en vivo)
+
+
+def load_models() -> Models:
+    coviews = load_coviews()
+    live_file = model.WEIGHTS_FILE.with_name("model_weights_live.json")
+    m = Models(coviews, model.index_coviews(coviews),
+               model.load_weights() if model.WEIGHTS_FILE.exists() else None,
+               model.load_weights(live_file) if live_file.exists() else None)
+    if m.weights is None:
+        print("AVISO: falta model_weights.json (ejecuta train.py); se usará v1")
+    if m.weights_live is None and any(v.startswith(("v4", "v5")) for v in VARIANTS):
+        print("AVISO: falta model_weights_live.json (ejecuta train_live.py); v4/v5 usarán los pesos del histórico")
+    return m
+
+
+def respond(req: Record, version: str, s: State, blocked: set[str], users: UserStore, m: Models) -> Record:
+    """La respuesta a una request con la variante indicada. Nunca falla: si algo va mal, los más populares."""
+    try:
+        if version.startswith(("v2", "v3", "v4", "v5")) and m.weights is not None:
+            w = m.weights_live if version.startswith(("v4", "v5")) and m.weights_live is not None else m.weights
+            items = recommend_v2(req, s, users, m.coviews_idx, w, blocked,
+                                 skip_bought=not version.startswith("v2"), cart_first=version.startswith("v5"))
+        else:
+            version = version if version.startswith("v1") else "v1-coview-trend"
+            items = recommend_v1(req, s, m.coviews)
+    except Exception as e:
+        print(f"recommend falló ({e!r}), uso los más populares")
+        version, items = "fallback-propio", []
+    return {"request_id": req["request_id"], "items": valid(items, s, blocked), "model_version": version}
+
+
+def preflight() -> int:
+    """Comprobación antes de un despliegue: carga todo y responde a 100 requests reales con CADA variante,
+    sin enviar nada. Devuelve 0 si todo es válido (lo usa deploy.sh)."""
+    t0 = time.time()
+    bg = Background(hist_popularity())
+    m = load_models()
+    bg._load_users()
+    s, blocked = bg.state, {p for p, last in stock_changes().items() if last == "out_of_stock"}
+    reqs = query(NEW_REQUESTS, timeout=10)
+    ok = len(reqs) > 0 and len(s.available) >= 10
+    for version in VARIANTS:
+        t = time.time()
+        out = [respond(r, version, s, blocked, bg.users, m) for r in reqs]
+        ms = (time.time() - t) * 1000 / max(len(out), 1)
+        bad = sum(len(a["items"]) != 10 or len(set(a["items"])) != 10 or not set(a["items"]) <= s.available
+                  or bool(set(a["items"]) & blocked) for a in out)
+        fell_back = sum(a["model_version"] != version for a in out)
+        print(f"  {version:<18} {len(out)} requests | inválidas: {bad} | no usaron esta variante: {fell_back} | {ms:.2f} ms/request")
+        ok = ok and bad == 0 and fell_back == 0 and ms < 200
+    print(f"PREFLIGHT {'OK' if ok else 'FALLIDO'} ({time.time() - t0:.0f}s) | variantes: {VARIANTS}")
+    return 0 if ok else 1
+
+
 def main() -> None:
+    if "--preflight" in sys.argv:
+        sys.exit(preflight())
     print("MODO PRUEBA: no se envía nada" if DRY_RUN else "PRODUCCIÓN: enviando respuestas")
     hist_pop = hist_popularity()
-    coviews = load_coviews()
     bg = Background(hist_pop)
-    coviews_idx = model.index_coviews(coviews)
-    weights = model.load_weights() if model.WEIGHTS_FILE.exists() else None
-    live_file = model.WEIGHTS_FILE.with_name("model_weights_live.json")
-    weights_live = model.load_weights(live_file) if live_file.exists() else None
-    if weights_live is None and any(v.startswith(("v4", "v5")) for v in VARIANTS):
-        print("AVISO: falta model_weights_live.json (ejecuta train_live.py); v4 usará los pesos del histórico")
-    if weights is None:
-        print("AVISO: falta model_weights.json (ejecuta train.py); los compradores de v2 recibirán v1")
+    m = load_models()
     bg.start()
     print(f"listo: {len(bg.state.available)} productos disponibles. Variantes: {VARIANTS}")
 
@@ -461,21 +543,7 @@ def main() -> None:
                 answers = []
                 for req in fresh:
                     seen[req["request_id"]] = None
-                    try:
-                        version = pick_variant(req)
-                        if version.startswith(("v2", "v3", "v4", "v5")) and weights is not None:
-                            w = weights_live if version.startswith(("v4", "v5")) and weights_live is not None else weights
-                            items = recommend_v2(req, s, bg.users, coviews_idx, w, blocked,
-                                                 skip_bought=not version.startswith("v2"),
-                                                 cart_first=version.startswith("v5"))
-                        else:
-                            version = version if version.startswith("v1") else "v1-coview-trend"
-                            items = recommend_v1(req, s, coviews)
-                    except Exception as e:
-                        print(f"recommend falló ({e!r}), uso los más populares")
-                        version, items = "fallback-propio", []
-                    answers.append({"request_id": req["request_id"], "items": valid(items, s, blocked),
-                                    "model_version": version})
+                    answers.append(respond(req, pick_variant(req), s, blocked, bg.users, m))
                 push(answers)
                 answered += len(answers)
                 if answered % 300 < len(answers):
