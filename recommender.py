@@ -61,9 +61,10 @@ DRY_RUN = "--dry-run" in sys.argv
 # para el mismo comprador). La clave es la etiqueta model_version que muestra `monitor.py conv`.
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
-    "v6-similar-users": 30, # control: v4 + "usuarios parecidos" + carrito sin compra / visto sin carrito
-    "v8-new-products": 30,  # v6 reentrenado con más feedback + señal de producto nuevo (tope 0,4), sin las 2 redundantes
-    "v7-explore": 40,       # sortea 10 entre los 40 mejores de v6 para aprender (solo en práctica: NO para la final)
+    "v6-similar-users": 25, # control: v4 + "usuarios parecidos" + carrito sin compra / visto sin carrito
+    "v8-new-products": 25,  # v6 reentrenado con más feedback + señal de producto nuevo (tope 0,4), sin las 2 redundantes
+    "v7-explore": 25,       # sortea 10 entre los 40 mejores de v9 (ver EXPLORE). Solo en práctica: NO para la final
+    "v7b-explore-v6": 25,   # lo mismo, pero sorteando entre los 40 mejores de v6
     # "v9-organic": 0,      # v8 + señal orgánica (GBM de vistas orgánicas). PERDIÓ en vivo según el leaderboard:
     #                         1,17 % de conversión esperada frente a 1,45 % de v6 (y 1,22 % vs 1,83 % en cold),
     #                         pese a predecir mejor offline (AUC 0,86 vs 0,80). No usar.
@@ -77,8 +78,11 @@ VARIANTS: dict[str, int] = {
     # "v1-coview-trend": 0, # perdió contra v2 en vivo (0,53 % vs 1,13 % de conversión, 14-nov)
 }
 
-# Exploración (variantes cuyo nombre acaba en "-explore")
-EXPLORE_BASE = "v6"      # parte de las puntuaciones de esta versión
+# Exploración: variante -> versión de cuyas puntuaciones parte el sorteo.
+# v7-explore sigue sobre v9 a propósito: v9 como modelo pierde (1,20 % frente a 1,46 % de v6), pero SORTEAR
+# entre sus 40 mejores da 1,54 %, lo mejor que tenemos. Se compara con el mismo sorteo sobre v6 para saber
+# si lo bueno es el sorteo en sí o los candidatos de v9.
+EXPLORE = {"v7-explore": "v9", "v7b-explore-v6": "v6"}
 EXPLORE_TOP = 40         # candidatos entre los que se sortea
 EXPLORE_T = 1.0          # temperatura: 1 = cada candidato sale en proporción a su probabilidad estimada de compra
 EXPLORE_DRAWS = 300      # sorteos extra para estimar la probabilidad de cada producto en cada puesto
@@ -419,7 +423,7 @@ def recommend_explore(req: Record, s: State, users: UserStore, coviews_idx: dict
         log_prob += math.log(max(w[j] / left, 1e-300))
         left = max(left - w[j], 1e-300)
     names = model.PRODUCTS.names
-    log = {"feature_set": "explore_v1", "kind": "explore", "base": EXPLORE_BASE, "T": T,
+    log = {"feature_set": "explore_v1", "kind": "explore", "T": T,
            "candidates": [names[i] for i in cand], "scores": [round(float(x), 4) for x in score[cand]],
            "shown": [names[cand[j]] for j in pick], "log_prob_list": round(log_prob, 4),
            # estimadas con EXPLORE_DRAWS sorteos: al usarlas como 1/p, acotar por abajo con 1/(2·EXPLORE_DRAWS)
@@ -551,7 +555,7 @@ def load_models() -> Models:
         m.by_version[f.stem.removeprefix("model_weights_")] = model.load_weights(f)
     m.explore_q = queue.Queue(maxsize=20_000)
     for v in VARIANTS:
-        prefix = EXPLORE_BASE if v.endswith("-explore") else v.split("-")[0]
+        prefix = EXPLORE.get(v, v.split("-")[0])
         if prefix not in ("v1", "v2", "v3", "v4", "v5") and prefix not in m.by_version:
             print(f"AVISO: falta model_weights_{prefix}.json; {v} no puede funcionar")
     if not model.MF_FILE.exists():
@@ -567,13 +571,14 @@ def respond(req: Record, version: str, s: State, blocked: set[str], users: UserS
     """La respuesta a una request con la variante indicada. Nunca falla: si algo va mal, los más populares."""
     try:
         prefix = version.split("-")[0]
-        if version.endswith("-explore"):
-            w = m.by_version.get(EXPLORE_BASE)
+        if version in EXPLORE:
+            w = m.by_version.get(EXPLORE[version])
             if w is None:
-                raise RuntimeError(f"faltan los pesos de {EXPLORE_BASE} para explorar")
+                raise RuntimeError(f"faltan los pesos de {EXPLORE[version]} para explorar")
             items, log = recommend_explore(req, s, users, m.coviews_idx, w, blocked)
             if log is not None and m.explore_q is not None:
-                log.update(request_id=req["request_id"], user_id=req.get("user_id"), model_version=version)
+                log.update(request_id=req["request_id"], user_id=req.get("user_id"), model_version=version,
+                           base=EXPLORE[version])
                 try:
                     m.explore_q.put_nowait(log)
                 except queue.Full:   # el registro nunca frena ni rompe la respuesta
@@ -649,7 +654,7 @@ def main() -> None:
     bg = Background(hist_pop)
     m = load_models()
     bg.start()
-    if not DRY_RUN and any(v.endswith("-explore") for v in VARIANTS):
+    if not DRY_RUN and any(v in EXPLORE for v in VARIANTS):
         threading.Thread(target=explore_logger, args=(m.explore_q,), daemon=True).start()
     print(f"listo: {len(bg.state.available)} productos disponibles. Variantes: {VARIANTS}")
 

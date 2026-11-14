@@ -55,7 +55,7 @@ class Basics(unittest.TestCase):
     def test_explore_is_valid_random_and_logged(self):
         users = model.UserStore(capacity=8)
         users.add_event("u1", "p012", "purchase", STATE.items)
-        m = rec.Models({}, {}, WEIGHTS, WEIGHTS, {rec.EXPLORE_BASE: WEIGHTS})
+        m = rec.Models({}, {}, WEIGHTS, WEIGHTS, {base: WEIGHTS for base in rec.EXPLORE.values()})
         m.explore_q = rec.queue.Queue()
         req = {"request_id": "r1", "user_id": "u1", "recent_views": [{"product_id": "p010"}]}
         outs = [rec.respond(req, "v7-explore", STATE, {"p020"}, users, m) for _ in range(5)]
