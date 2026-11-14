@@ -30,8 +30,17 @@ import model
 import recommender as rec
 
 LAG_MS = 30_000  # en producción los eventos entran en la memoria con ~0-60 s de retraso
-OUT = model.WEIGHTS_FILE.with_name("model_weights_v6.json" if "--v6" in sys.argv else "model_weights_live.json")
-V6 = "--v6" in sys.argv   # con --v6 se aprenden también las señales nuevas (mf, cart_no_buy, viewed_no_cart)
+def _arg(flag: str) -> str | None:
+    return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else None
+
+
+# --v6            : aprende también las señales nuevas (mf, cart_no_buy, viewed_no_cart) -> model_weights_v6.json
+# --out v7        : lo mismo, pero guarda en model_weights_v7.json
+# --drop a,b      : señales que se dejan fuera (peso 0), p. ej. --drop cart_no_buy,viewed_no_cart
+NAME = _arg("--out") or ("v6" if "--v6" in sys.argv else None)
+V6 = NAME is not None
+DROP = [model.FI[n] for n in (_arg("--drop") or "").split(",") if n]
+OUT = model.WEIGHTS_FILE.with_name(f"model_weights_{NAME}.json" if NAME else "model_weights_live.json")
 LIVE = """
 SELECT r.user_id::String AS u, toUnixTimestamp64Milli(r.ts::DateTime64(3)) AS ms,
        arrayMap(x -> x.product_id::String, r.recent_views::Array(JSON)) AS rv,
@@ -114,6 +123,7 @@ def main() -> None:
     X, slot, click, buy, when = live_examples()
     if not V6:  # la versión v4 solo usa las 16 señales originales
         X[:, model.FI["mf"]:] = 0
+    X[:, DROP] = 0
     L = {"X": X, "slot": slot, "click": click, "buy": buy}
     q60, q75 = np.quantile(when, [0.60, 0.75])
     tr, va, te = when < q60, (when >= q60) & (when < q75), when >= q75

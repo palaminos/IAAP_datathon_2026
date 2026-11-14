@@ -40,7 +40,7 @@ class Basics(unittest.TestCase):
             users.add_event("u1", "p010", "view", STATE.items)
         users.add_event("u1", "p011", "add_to_cart", STATE.items)
         users.add_event("u1", "p012", "purchase", STATE.items)
-        m = rec.Models({}, {}, WEIGHTS, WEIGHTS, WEIGHTS)
+        m = rec.Models({}, {}, WEIGHTS, WEIGHTS, {"v6": WEIGHTS})
         reqs = [{"request_id": "r1", "user_id": "u1", "recent_views": [{"product_id": "p010"}]},
                 {"request_id": "r2", "user_id": "desconocido", "recent_views": []},
                 {"request_id": "r3", "user_id": "u1", "recent_views": [{"product_id": "no-existe"}]}]

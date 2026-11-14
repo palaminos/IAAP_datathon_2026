@@ -467,19 +467,24 @@ class Models:
     coviews_idx: dict
     weights: Any = None        # model_weights.json (histórico)
     weights_live: Any = None   # model_weights_live.json (corregidos con el feedback en vivo)
-    weights_v6: Any = None     # model_weights_v6.json (v6: con las señales nuevas, aprendidos del feedback)
+    by_version: dict = field(default_factory=dict)   # "v6", "v7"... -> pesos de model_weights_v6.json, _v7.json...
 
 
 def load_models() -> Models:
     coviews = load_coviews()
     live_file = model.WEIGHTS_FILE.with_name("model_weights_live.json")
-    v6_file = model.WEIGHTS_FILE.with_name("model_weights_v6.json")
     m = Models(coviews, model.index_coviews(coviews),
                model.load_weights() if model.WEIGHTS_FILE.exists() else None,
-               model.load_weights(live_file) if live_file.exists() else None,
-               model.load_weights(v6_file) if v6_file.exists() else None)
-    if any(v.startswith("v6") for v in VARIANTS) and (m.weights_v6 is None or not model.MF_FILE.exists()):
-        print("AVISO: falta model_weights_v6.json o mf_factors.npz; v6 no puede funcionar bien")
+               model.load_weights(live_file) if live_file.exists() else None)
+    # Versiones posteriores (v6, v7...): cada una con su fichero de pesos model_weights_<versión>.json
+    for f in sorted(model.WEIGHTS_FILE.parent.glob("model_weights_v*.json")):
+        m.by_version[f.stem.removeprefix("model_weights_")] = model.load_weights(f)
+    for v in VARIANTS:
+        prefix = v.split("-")[0]
+        if prefix not in ("v1", "v2", "v3", "v4", "v5") and prefix not in m.by_version:
+            print(f"AVISO: falta model_weights_{prefix}.json; {v} no puede funcionar")
+    if not model.MF_FILE.exists():
+        print("AVISO: falta mf_factors.npz; la señal de usuarios parecidos valdrá 0")
     if m.weights is None:
         print("AVISO: falta model_weights.json (ejecuta train.py); se usará v1")
     if m.weights_live is None and any(v.startswith(("v4", "v5")) for v in VARIANTS):
@@ -490,12 +495,13 @@ def load_models() -> Models:
 def respond(req: Record, version: str, s: State, blocked: set[str], users: UserStore, m: Models) -> Record:
     """La respuesta a una request con la variante indicada. Nunca falla: si algo va mal, los más populares."""
     try:
-        if version.startswith(("v2", "v3", "v4", "v5", "v6")) and m.weights is not None:
+        prefix = version.split("-")[0]
+        if not version.startswith("v1") and m.weights is not None:
             w = m.weights_live if version.startswith(("v4", "v5")) and m.weights_live is not None else m.weights
-            if version.startswith("v6"):
-                if m.weights_v6 is None:
-                    raise RuntimeError("faltan los pesos de v6")
-                w = m.weights_v6
+            if prefix not in ("v2", "v3", "v4", "v5"):
+                if prefix not in m.by_version:
+                    raise RuntimeError(f"faltan los pesos de {prefix}")
+                w = m.by_version[prefix]
             items = recommend_v2(req, s, users, m.coviews_idx, w, blocked,
                                  skip_bought=not version.startswith("v2"), cart_first=version.startswith("v5"))
         else:
