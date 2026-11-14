@@ -110,7 +110,8 @@ def evaluate(sessions, items, users, cov_idx, state, coviews, policies: dict[str
     return res
 
 
-def main() -> None:
+def history_examples():
+    """Ejemplos del histórico con el corte temporal: 46 días de apoyo, luego semana A y semana B."""
     t0 = time.time()
     end = dt.datetime.fromisoformat(rec.query("SELECT toString(max(ts::DateTime64(0))) AS d FROM shop.history_sessions")[0]["d"]).date()
     cut = end - dt.timedelta(days=13)   # semana A = [cut, cut+7), semana B = [cut+7, cut+14)
@@ -138,6 +139,15 @@ def main() -> None:
     sessions = download_sessions(cut, 14)
     X, slot, click, buy, weight, group, week, kept = build_examples(sessions, items, users, cov_idx)
     print(f"{len(kept)} carruseles, {len(X)} ejemplos, {int(click.sum())} clics, {int(buy.sum())} compras ({time.time() - t0:.0f}s)")
+    return dict(X=X, slot=slot, click=click, buy=buy, weight=weight, week=week, kept=kept, items=items, users=users,
+                cov_idx=cov_idx, state=state, coviews=coviews, cut=cut)
+
+
+def main() -> None:
+    t0 = time.time()
+    h = history_examples()
+    X, slot, click, buy, weight, week, kept = (h[k] for k in ("X", "slot", "click", "buy", "weight", "week", "kept"))
+    items, users, cov_idx, state, coviews, cut = (h[k] for k in ("items", "users", "cov_idx", "state", "coviews", "cut"))
 
     A = week == 0
     w_buy = fit(X[A], slot[A], buy[A], weight[A])

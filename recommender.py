@@ -53,8 +53,9 @@ DRY_RUN = "--dry-run" in sys.argv
 # para el mismo comprador). La clave es la etiqueta model_version que muestra `monitor.py conv`.
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
+    "v4-live-weights": 50,  # v3 con los pesos corregidos con nuestro feedback en vivo (train_live.py)
     "v3-no-rebuy": 50,      # v2 + no recomendar lo que el usuario ya compró
-    "v2-user-lr": 50,
+    # "v2-user-lr": 0,      # iba por detrás de v3 en vivo (14-nov)
     # "v1-coview-trend": 0, # perdió contra v2 en vivo (0,53 % vs 1,13 % de conversión, 14-nov)
 }
 
@@ -390,6 +391,10 @@ def main() -> None:
     bg = Background(hist_pop)
     coviews_idx = model.index_coviews(coviews)
     weights = model.load_weights() if model.WEIGHTS_FILE.exists() else None
+    live_file = model.WEIGHTS_FILE.with_name("model_weights_live.json")
+    weights_live = model.load_weights(live_file) if live_file.exists() else None
+    if weights_live is None and any(v.startswith("v4") for v in VARIANTS):
+        print("AVISO: falta model_weights_live.json (ejecuta train_live.py); v4 usará los pesos del histórico")
     if weights is None:
         print("AVISO: falta model_weights.json (ejecuta train.py); los compradores de v2 recibirán v1")
     bg.start()
@@ -414,9 +419,10 @@ def main() -> None:
                     seen[req["request_id"]] = None
                     try:
                         version = pick_variant(req)
-                        if version.startswith(("v2", "v3")) and weights is not None:
-                            items = recommend_v2(req, s, bg.users, coviews_idx, weights, blocked,
-                                                 skip_bought=version.startswith("v3"))
+                        if version.startswith(("v2", "v3", "v4")) and weights is not None:
+                            w = weights_live if version.startswith("v4") and weights_live is not None else weights
+                            items = recommend_v2(req, s, bg.users, coviews_idx, w, blocked,
+                                                 skip_bought=not version.startswith("v2"))
                         else:
                             version = version if version.startswith("v1") else "v1-coview-trend"
                             items = recommend_v1(req, s, coviews)
