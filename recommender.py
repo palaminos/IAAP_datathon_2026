@@ -66,14 +66,16 @@ DRY_RUN = "--dry-run" in sys.argv
 VARIANTS: dict[str, int] = {
     # Noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12: esta noche el tráfico se
     # reparte para APRENDER qué versión es la mejor.
-    "v8-new-products": 30,  # campeona por decisión de tarre (21:05) y control: v6 reentrenado + señal de producto nuevo
-    "v14-cf-split": 19,     # v13 + pesos distintos para compradores nuevos y conocidos. Primera media hora: +0,30 (z = +2,0)
-    "v17-ease": 19,         # v14 con otra tabla de parecidos (EASE, train_ease.py): en el histórico separa mejor
-    "v18-live": 19,         # v14 + señales de lo que el comprador ha visto o metido en el carrito durante el evento
-    "v12-cf": 13,           # v8 + parecido con lo que el comprador metió en el carrito o compró: +0,20 (z = +1,9)
+    "v14-cf-split": 30,     # CAMPEONA desde las 22:35: parecido entre productos + pesos distintos para compradores
+                            # nuevos y conocidos. +0,27 sobre v8 (z = +2,5); toda la familia del parecido gana a v8
+    "v17-ease": 25,         # v14 con la tabla de parecidos EASE: +0,25 sobre v8 con 987 requests, y sube con conocidos
+    "v13-cf-session": 25,   # como v14 pero con un solo juego de pesos: cerró +0,37 sobre v8 (z = +3,0). Vuelve para
+                            # medirla cara a cara con v14 (¿sirven los pesos separados?)
+    "v8-new-products": 10,  # campeona anterior, como referencia de cuánto se ha ganado
+    "v18-live": 10,         # v14 + señales del evento: +0,09 sobre v8 con 1.005 requests; sigue con poco tráfico
     # Retiradas (conversión esperada del leaderboard, por tramos):
-    #   v13-cf-session  +0,18 (z = +1,5) con 1.552 requests: no es peor, pero v14 la incluye y hace falta el hueco
-    #   v6-similar-users empatada con v8 (-0,01, z = -0,1, 4.918 requests): ya no hace falta como control
+    #   v12-cf          +0,22 sobre v8 (z = +2,4; 2.984 requests): demostró que el parecido funciona; v13 y v14 la incluyen
+    #   v6-similar-users empatada con v8
     #   v9-organic      dos veces por debajo (z = -2,0 y z = -2,2)  -> no usar
     #   v10-sale        el peso aprendido de "rebajado" es -0,15: el empujón no tiene base
     #   v5-cart-first   1,24 % frente a 1,53 % de v4 (z = -3,0)  -> no usar
