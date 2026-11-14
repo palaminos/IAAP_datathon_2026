@@ -42,7 +42,11 @@ Diario: `logs/night_report.md`. Estado: `logs/night_state.json` (campeona, retad
 6. **Horario.** Rondas de ~3-4 horas. Experimentos hasta las 08:30. A las 08:30 se decide la campeona final.
    **Antes de las 09:15, campeona al 100 % y verificada. Después, ningún cambio**, salvo `--rollback` si
    falla la salud. De 10:00 a 12:00 solo se vigila.
-7. **Todo se apunta** en `logs/night_report.md` (qué se tocó, con qué evidencia, qué pasó) y cada cambio
+7. **Nada de descargas grandes en paralelo contra RawTree con producción en marcha** (`train.py`, consultas de
+   millones de filas con varias conexiones): a las 23:51 una así coincidió con 555 respuestas perdidas. Los
+   análisis del histórico usan la caché local (`cache/exp_*.pkl`). Desde las 09:15 no se lanza nada contra
+   RawTree salvo el recomendador y `night_check.py`.
+8. **Todo se apunta** en `logs/night_report.md` (qué se tocó, con qué evidencia, qué pasó) y cada cambio
    de modelo va en un commit con su explicación, subido a `origin/tarre` y verificado con `git ls-remote`.
 
 ## En cada despertar

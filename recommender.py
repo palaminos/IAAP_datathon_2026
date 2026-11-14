@@ -66,21 +66,17 @@ DRY_RUN = "--dry-run" in sys.argv
 VARIANTS: dict[str, int] = {
     # Noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12: esta noche el tráfico se
     # reparte para APRENDER qué versión es la mejor.
-    "v14-cf-split": 25,     # CAMPEONA desde las 22:28: parecido entre productos + pesos distintos para nuevos y conocidos
-    "v13-cf-session": 20,   # como v14 con un solo juego de pesos: +0,09 sobre v14 (z = +1,0; 3.350 requests). Empate
-    "v20-split-retrain": 20,   # receta de v14 reentrenada a las 23:15 con el feedback de la noche
-    "v21-single-retrain": 20,  # receta de v13 reentrenada a las 23:15 con el feedback de la noche
-    "v17-ease": 15,         # v14 con la tabla EASE: -0,12 frente a v14 (z = -1,2; 3.172 requests). Sigue con menos tráfico
-    # Retiradas (conversión esperada del leaderboard, por tramos):
-    #   v8-new-products -0,36 frente a v14 (z = -4,1; 4.430 requests): la familia del parecido es claramente mejor
-    #   v18-live        -0,22 frente a v14 (z = -1,9): las señales del evento no ayudan
-    #   v12-cf          +0,22 sobre v8 (z = +2,4): v13 y v14 la incluyen
-    #   v6-similar-users empatada con v8
-    #   v9-organic      dos veces por debajo (z = -2,0 y z = -2,2)  -> no usar
-    #   v10-sale        el peso aprendido de "rebajado" es -0,15: el empujón no tiene base
-    #   v5-cart-first   -0,43 frente a v4 (z = -3,6)  -> no usar
-    #   v4-live-weights 1,53 % frente a 1,66 % de v6 (z = -2,5)
-    #   v7-explore / v7b-explore-v6: sorteos para aprender; bajan la conversión. Solo si se decide a propósito
+    "v14-cf-split": 30,     # CAMPEONA desde las 22:28: parecido entre productos + pesos distintos para nuevos y conocidos
+    "v22-cart-top": 25,     # v14 (mismos pesos) + con compradores conocidos, su mejor producto del carrito va el primero
+    "v23-pop-log": 25,      # receta de v14 reentrenada a las 23:15 + popularidad en escala logarítmica
+    "v20-split-retrain": 20,   # receta de v14 reentrenada a las 23:15 (sin más): control de v23 y prueba del reentreno
+    # Retiradas (conversión esperada del leaderboard, por tramos, frente a v14):
+    #   v13-cf-session  +0,05 (z = +0,6; 5.255 requests): empate. Un juego de pesos o dos da lo mismo
+    #   v17-ease        +0,01 (z = +0,1; 4.547 requests): empate. La tabla EASE no mejora en vivo
+    #   v21-single-retrain -0,26 (z = -1,9; 1.624 requests)
+    #   v18-live        -0,16 (z = -1,5): las señales del evento no ayudan
+    #   v8-new-products -0,31 (z = -3,6): la familia del parecido es claramente mejor
+    #   v12-cf, v6, v9-organic, v10-sale, v5-cart-first, v4, v7-explore: ver logs/night_report.md
 }
 
 # Exploración: variante -> versión de cuyas puntuaciones parte el sorteo.
@@ -381,7 +377,7 @@ def recommend_v1(req: Record, s: State, coviews: dict[str, list[str]], w: dict =
 
 def recommend_v2(req: Record, s: State, users: UserStore, coviews_idx: dict[int, list[int]], weights,
                  blocked: set[str] = frozenset(), skip_bought: bool = False, cart_first: bool = False,
-                 cf_fill: bool = False, cf_table: str = "") -> list[str]:
+                 cf_fill: bool = False, cf_table: str = "", cart_top: bool = False) -> list[str]:
     """v2: puntúa todos los productos (señales × pesos aprendidos) y se queda con los 10 mejores.
 
     skip_bought (v3): descarta lo que el usuario ya compró. En el feedback real del 14-nov, un producto
@@ -397,6 +393,16 @@ def recommend_v2(req: Record, s: State, users: UserStore, coviews_idx: dict[int,
         score[(F[:, model.FI["p_cart"]] > 0) & (F[:, model.FI["p_buy"]] == 0)] += 1000.0
     if skip_bought:
         score[F[:, model.FI["p_buy"]] > 0] = -np.inf
+    if cart_top:
+        # v22: el MEJOR producto del carrito sin comprar va el primero (solo uno; el resto se queda como estaba).
+        # En el feedback del 14-nov, con compradores conocidos que tienen algún carrito en la lista: si el primero
+        # es del carrito la lista convierte 2,1 % (1.er puesto 0,89 %); si es otro, 1,1 % (1.er puesto 0,25 %).
+        # No es v5: v5 ponía TODOS los carritos delante y perdió.
+        c = (F[:, model.FI["p_cart"]] > 0) & (F[:, model.FI["p_buy"]] == 0) & s.items.avail & np.isfinite(score)
+        for j in np.flatnonzero(c)[np.argsort(-score[c], kind="stable")][:5]:
+            if model.PRODUCTS.names[j] not in blocked:
+                score[j] = float(np.max(score[np.isfinite(score)])) + 100.0
+                break
     return model.top10(score, s.items, blocked)
 
 
@@ -603,17 +609,21 @@ def respond(req: Record, version: str, s: State, blocked: set[str], users: UserS
                     pass
         elif prefix != "v1" and m.weights is not None:   # ojo: comparar el prefijo exacto ("v10" empieza por "v1")
             w = m.weights_live if prefix in ("v4", "v5") and m.weights_live is not None else m.weights
+            is_new = False
             if prefix not in ("v2", "v3", "v4", "v5"):
                 if prefix not in m.by_version:
                     raise RuntimeError(f"faltan los pesos de {prefix}")
                 w = m.by_version[prefix]
                 # Pesos propios para compradores nuevos, si la versión los trae (model_weights_<versión>n.json)
-                if prefix + "n" in m.by_version and str(req.get("is_new_user")).lower() in ("true", "1"):
+                is_new = str(req.get("is_new_user")).lower() in ("true", "1")
+                if prefix + "n" in m.by_version and is_new:
                     w = m.by_version[prefix + "n"]
+            opts = m.options.get(prefix, {})
+            # cart_top: "known" = solo compradores conocidos; "all" = todos
+            cart_top = opts.get("cart_top") == "all" or (opts.get("cart_top") == "known" and not is_new)
             items = recommend_v2(req, s, users, m.coviews_idx, w, blocked,
                                  skip_bought=prefix != "v2", cart_first=prefix == "v5",
-                                 cf_fill=bool(m.options.get(prefix, {}).get("cf_fill")),
-                                 cf_table=m.options.get(prefix, {}).get("cf_file") or "")
+                                 cf_fill=bool(opts.get("cf_fill")), cf_table=opts.get("cf_file") or "", cart_top=cart_top)
         else:
             version = version if prefix == "v1" else "v1-coview-trend"
             items = recommend_v1(req, s, m.coviews)
