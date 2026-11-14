@@ -23,6 +23,7 @@ import json
 import math
 import os
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -662,6 +663,40 @@ def age_s(req: Record) -> float:
         return 0.0
 
 
+# Alarma de conexión, SOLO durante la final (hora local). El sábado por la noche el Mac cambió tres veces de wifi
+# y cada vez estuvo 7-10 minutos sin responder porque nadie se enteró. Si durante la final pasan 30 s sin poder
+# leer de RawTree, el Mac suena y lo dice en voz alta hasta que vuelva la conexión. No cambia nada del sistema.
+# Para desactivarla: crear el fichero logs/no_alarm (no hace falta reiniciar nada).
+ALARM_WINDOW = ("2026-11-15 09:30", "2026-11-15 12:10")
+ALARM_AFTER_S = 30
+LAST_OK = [time.time()]   # momento de la última lectura de requests que funcionó
+
+
+def alarm_due(now: float | None = None) -> float:
+    """Segundos sin conexión si toca dar la alarma; 0 si no."""
+    now = now or time.time()
+    a, b = (dt.datetime.strptime(x, "%Y-%m-%d %H:%M").timestamp() for x in ALARM_WINDOW)
+    down = now - LAST_OK[0]
+    return down if down > ALARM_AFTER_S and a <= now <= b and not Path("logs/no_alarm").exists() else 0.0
+
+
+def net_alarm(run=subprocess.run) -> None:
+    """Hilo aparte. Nunca termina ni rompe nada: si el sonido falla, se apunta en el log y ya está."""
+    while True:
+        time.sleep(5)
+        try:
+            down = alarm_due()
+            if down:
+                print(f"!!! ALARMA: {down:.0f} s sin conexión con RawTree. Revisad el wifi.")
+                for _ in range(3):
+                    run(["afplay", "/System/Library/Sounds/Sosumi.aiff"], timeout=10)
+                run(["say", "Datathon sin internet. Revisad el wifi."], timeout=20)
+                time.sleep(10)
+        except Exception as e:
+            print(f"la alarma falló: {e!r}")
+            time.sleep(30)
+
+
 def poller(inbox: "queue.Queue", delay: float) -> None:
     """Hilo lector: pide las últimas requests una y otra vez y las deja en `inbox`. Nunca termina."""
     session = new_session()
@@ -669,6 +704,7 @@ def poller(inbox: "queue.Queue", delay: float) -> None:
     while True:
         try:
             inbox.put(query(NEW_REQUESTS, timeout=3, session=session))
+            LAST_OK[0] = time.time()
         except Exception as e:
             print(f"error: {e}")
             session = new_session()   # conexión nueva: la anterior puede haberse quedado colgada
@@ -749,6 +785,8 @@ def main() -> None:
         return threads
 
     threads = start_threads()
+    if not DRY_RUN:
+        threading.Thread(target=net_alarm, daemon=True).start()
     answered = 0
     ages: list[float] = []   # segundos entre el ts de cada request y el momento de responderla
     while True:

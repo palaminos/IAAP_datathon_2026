@@ -85,6 +85,48 @@ class Basics(unittest.TestCase):
         self.assertLess(log["log_prob_list"], 0)
         self.assertEqual(m.explore_q.qsize(), 4)
 
+    def test_cart_top_and_split_weights(self):
+        """v22: con compradores conocidos, el mejor producto del carrito va primero; con nuevos no se toca.
+        Y una versión con pesos propios para nuevos (v22n) los usa solo con is_new_user."""
+        users = model.UserStore(capacity=8)
+        users.add_event("u1", "p040", "add_to_cart", STATE.items)      # en el carrito, sin comprar
+        users.add_event("u1", "p041", "add_to_cart", STATE.items)
+        users.add_event("u1", "p041", "purchase", STATE.items)         # en el carrito pero ya comprado
+        pop = np.zeros(model.K, np.float32)
+        pop[model.FI["pop_glob"]] = 1.0                                # solo popularidad: p040 nunca saldría primero
+        price = np.zeros(model.K, np.float32)
+        price[model.FI["log_price"]] = 1.0                             # pesos "de nuevos": lo más caro primero
+        m = rec.Models({}, {}, WEIGHTS, WEIGHTS, {"v14": pop, "v22": pop, "v22n": price})
+        m.options = {"v22": {"cart_top": "known"}}
+        known = {"request_id": "r1", "user_id": "u1", "recent_views": [], "is_new_user": False}
+        new = dict(known, is_new_user=True)
+        base = rec.respond(known, "v14-cf-split", STATE, set(), users, m)["items"]
+        out = rec.respond(known, "v22-cart-top", STATE, set(), users, m)["items"]
+        self.assertNotEqual(base[0], "p040")
+        self.assertEqual(out[0], "p040")                               # el carrito sin comprar, primero
+        self.assertNotIn("p041", out)                                  # lo ya comprado, nunca
+        self.assertEqual(out[1:], [p for p in base if p != "p040"][:9])  # el resto de la lista no cambia
+        self.assertTrue(is_valid(out))
+        self.assertEqual(rec.respond(known, "v22-cart-top", STATE, {"p040"}, users, m)["items"][0], base[0])  # agotado: como v14
+        new_out = rec.respond(new, "v22-cart-top", STATE, set(), users, m)["items"]
+        self.assertEqual(new_out[0], "p059")                           # comprador nuevo: pesos v22n y sin regla del carrito
+        self.assertTrue(is_valid(new_out))
+
+    def test_alarm_only_during_the_final_and_after_30s(self):
+        import datetime as dt
+        inside = dt.datetime.strptime(rec.ALARM_WINDOW[0], "%Y-%m-%d %H:%M").timestamp() + 600
+        before = dt.datetime.strptime(rec.ALARM_WINDOW[0], "%Y-%m-%d %H:%M").timestamp() - 600
+        old = rec.LAST_OK[0]
+        try:
+            rec.LAST_OK[0] = inside - 10
+            self.assertEqual(rec.alarm_due(inside), 0.0)               # 10 s sin conexión: aún no
+            rec.LAST_OK[0] = inside - 45
+            self.assertAlmostEqual(rec.alarm_due(inside), 45.0)        # 45 s sin conexión durante la final: alarma
+            rec.LAST_OK[0] = before - 300
+            self.assertEqual(rec.alarm_due(before), 0.0)               # fuera de la final: nunca
+        finally:
+            rec.LAST_OK[0] = old
+
     def test_split_is_stable_and_balanced(self):
         self.assertEqual(rec.pick_variant({"user_id": "u_1", "request_id": "a"}), rec.pick_variant({"user_id": "u_1", "request_id": "b"}))
         counts = Counter(rec.pick_variant({"user_id": f"u_{i}", "request_id": "x"}) for i in range(4000))
