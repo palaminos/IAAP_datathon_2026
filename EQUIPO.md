@@ -18,8 +18,10 @@ Reglas completas del reto en [README.md](README.md) · Leaderboard: https://data
 pip install -r starter/requirements.txt
 cp .env.example .env            # TEAM_ID=team_23 y la clave (pedídsela al equipo; NUNCA se sube)
 python monitor.py check         # ¿funciona la conexión?
-caffeinate -i python recommender_v1.py
+./run_forever.sh                # producción: reinicia solo si se cae, logs en logs/production.log
 ```
+
+Lanzadlo desde la app **Terminal** de macOS (no desde VS Code), con el Mac enchufado y la tapa abierta.
 
 ⚠️ **Solo un recomendador corriendo a la vez para todo el equipo.** Dos a la vez responden dos veces a la misma
 request y solo cuenta una. Avisad en el grupo antes de parar o lanzar el que está en producción.
