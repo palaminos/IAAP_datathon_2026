@@ -46,6 +46,8 @@ FEATURES = [
     "is_new_prod",     # 1 si el producto se lanzó durante el evento (new_product en shop.catalog_updates)
     # --- añadida en v9 ---
     "organic",         # salida de un GBM entrenado con la actividad orgánica de la tienda (train_organic.py)
+    # --- añadida en v10 ---
+    "on_sale",         # 1 si el producto está rebajado ahora (precio actual < 95 % de su precio base)
 ]
 K = len(FEATURES)
 FI = {name: i for i, name in enumerate(FEATURES)}
@@ -125,6 +127,7 @@ class Items:
         self.brand = np.zeros(n, np.int32)
         self.avail = np.zeros(n, bool)
         self.is_new = np.zeros(n, np.float32)
+        self.on_sale = np.zeros(n, np.float32)
         price = np.ones(n)
         pop = np.zeros(n)
         for pid, info in product.items():
@@ -135,6 +138,8 @@ class Items:
             pop[i] = popularity.get(pid, 0.0)
             self.avail[i] = pid in available
             self.is_new[i] = float(info.get("is_new") in (1, True, "1", "true"))
+            base = float(info.get("base_price") or 0.0)
+            self.on_sale[i] = float(base > 0 and price[i] < 0.95 * base)
         self.nsub, self.ncat = len(SUBS), len(CATS)
         self.sub2cat = np.zeros(self.nsub, np.int32)
         self.sub2cat[self.sub] = self.cat
@@ -322,6 +327,7 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
     F = np.zeros((n, K), np.float32)
     F[:, STATIC] = items.static
     F[:, FI["is_new_prod"]] = items.is_new
+    F[:, FI["on_sale"]] = items.on_sale
 
     row = users.row.get(user_id) if users is not None else None
     if row is not None:

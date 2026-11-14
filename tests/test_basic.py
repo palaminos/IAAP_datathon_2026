@@ -40,16 +40,23 @@ class Basics(unittest.TestCase):
             users.add_event("u1", "p010", "view", STATE.items)
         users.add_event("u1", "p011", "add_to_cart", STATE.items)
         users.add_event("u1", "p012", "purchase", STATE.items)
-        m = rec.Models({}, {}, WEIGHTS, WEIGHTS, {"v6": WEIGHTS, "v8": WEIGHTS, "v9": WEIGHTS})
+        m = rec.Models({}, {}, WEIGHTS, WEIGHTS, {"v6": WEIGHTS, "v8": WEIGHTS, "v9": WEIGHTS, "v10": WEIGHTS})
         reqs = [{"request_id": "r1", "user_id": "u1", "recent_views": [{"product_id": "p010"}]},
                 {"request_id": "r2", "user_id": "desconocido", "recent_views": []},
                 {"request_id": "r3", "user_id": "u1", "recent_views": [{"product_id": "no-existe"}]}]
-        for version in ("v1-coview-trend", "v2-user-lr", "v3-no-rebuy", "v4-live-weights", "v5-cart-first", "v6-similar-users", "v8-new-products", "v9-organic"):
+        for version in ("v1-coview-trend", "v2-user-lr", "v3-no-rebuy", "v4-live-weights", "v5-cart-first", "v6-similar-users", "v8-new-products", "v9-organic", "v10-sale"):
             for req in reqs:
                 out = rec.respond(req, version, STATE, {"p020"}, users, m)
                 self.assertTrue(is_valid(out["items"], {"p020"}), (version, req["request_id"], out))
                 self.assertEqual(out["model_version"], version)
         self.assertNotIn("p012", rec.respond(reqs[0], "v3-no-rebuy", STATE, set(), users, m)["items"])   # ya comprado
+        # "v10" no debe confundirse con "v1": tiene que usar sus propios pesos (aquí, premiar solo la rebaja)
+        only_sale = np.zeros(model.K, np.float32)
+        only_sale[model.FI["on_sale"]] = 1.0
+        STATE.items.on_sale[model.PRODUCTS.idx["p033"]] = 1.0
+        m10 = rec.Models({}, {}, WEIGHTS, WEIGHTS, {"v10": only_sale})
+        self.assertEqual(rec.respond(reqs[1], "v10-sale", STATE, set(), users, m10)["items"][0], "p033")
+        STATE.items.on_sale[model.PRODUCTS.idx["p033"]] = 0.0
         self.assertEqual(rec.respond(reqs[0], "v5-cart-first", STATE, set(), users, m)["items"][0], "p011")  # carrito primero
 
     def test_explore_is_valid_random_and_logged(self):

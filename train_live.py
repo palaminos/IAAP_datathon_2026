@@ -17,6 +17,7 @@ recompra). Cómo, sin hacer trampa:
 """
 from __future__ import annotations
 
+import bisect
 import datetime as dt
 import json
 import sys
@@ -51,6 +52,9 @@ SELECT f.request_id::String AS rid, r.user_id::String AS u, toUnixTimestamp64Mil
        f.shown::Array(String) AS shown, f.clicked::String AS clicked, f.purchased::String AS purchased
 FROM {team}.feedback AS f INNER JOIN shop.requests AS r ON r.request_id::String = f.request_id::String
 WHERE f.served_by::String = 'team' AND cityHash64(f.request_id::String) % 4 = {i}"""
+PRICE_CHANGES = """
+SELECT product_id::String AS p, toUnixTimestamp64Milli(ts::DateTime64(3)) AS ms, price_eur::Float64 AS price
+FROM shop.catalog_updates WHERE change::String = 'price_change' ORDER BY ts"""
 EXPLORED = "SELECT request_id::String AS rid FROM {team}.scratch WHERE feature_set::String = 'explore_v1'"
 """Requests respondidas por la variante de exploración (listas sorteadas, no las 10 mejores)."""
 EVENTS = """
@@ -75,6 +79,22 @@ def live_examples():
     start = dt.datetime.fromisoformat(rec.query("SELECT toString(toStartOfHour(min(ts::DateTime64(3)))) AS d FROM shop.events")[0]["d"])
     hour, events, e = start, [], 0
     X, slot, click, buy, when, explored = [], [], [], [], [], []
+    # Rebajas: si cada producto mostrado estaba rebajado EN EL MOMENTO de la request (no ahora)
+    changes: dict[str, tuple[list, list]] = {}
+    try:
+        for r in rec.query(PRICE_CHANGES, timeout=120):
+            ms_list, price_list = changes.setdefault(r["p"], ([], []))
+            ms_list.append(int(r["ms"])), price_list.append(float(r["price"]))
+    except Exception:
+        pass
+    base_price = {p: float(info.get("base_price") or 0.0) for p, info in state.product.items()}
+
+    def on_sale(p: str, ms: int) -> float:
+        ch = changes.get(p)
+        if not ch:
+            return 0.0
+        k = bisect.bisect_right(ch[0], ms) - 1
+        return float(k >= 0 and base_price.get(p, 0.0) > 0 and ch[1][k] < 0.95 * base_price[p])
     try:
         explore_ids = {r["rid"] for r in rec.query(EXPLORED.format(team=rec.TEAM), timeout=120)}
     except Exception:   # aún no hay registros de exploración
@@ -91,7 +111,9 @@ def live_examples():
             events, e = rec.query(EVENTS.format(a=hour, b=hour + dt.timedelta(hours=1)), timeout=300), 0
             hour += dt.timedelta(hours=1)
         idx = [model.PRODUCTS.idx[p] for p in r["shown"]]
-        X.append(model.add_organic(model.featurize(r["u"], [{"product_id": p} for p in r["rv"]], items, users, cov_idx)[idx]))
+        rows = model.add_organic(model.featurize(r["u"], [{"product_id": p} for p in r["rv"]], items, users, cov_idx)[idx])
+        rows[:, model.FI["on_sale"]] = [on_sale(p, int(r["ms"])) for p in r["shown"]]
+        X.append(rows)
         slot.append(np.arange(10)), when.append(np.full(10, int(r["ms"])))
         explored.append(np.full(10, r.get("rid") in explore_ids))
         click.append([p == r["clicked"] for p in r["shown"]]), buy.append([p == r["purchased"] for p in r["shown"]])
