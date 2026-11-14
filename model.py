@@ -59,6 +59,10 @@ FEATURES = [
     "cart_live",       # 1 si lo metió en el carrito DURANTE el evento (shop.events) y aún no lo ha comprado: se
                        # compra el doble que lo que solo estaba en el carrito en el histórico (1,1 % frente a 0,5 %)
     "view_live",       # log(1 + veces que lo ha visto durante el evento)
+    # --- añadida en v19 ---
+    "pop_log",         # popularidad en escala logarítmica (/10). pop_glob es un puesto (0-1) y casi no distingue
+                       # entre el más vendido y el nº 100, que es donde se juegan las listas (el top 1 % se compra
+                       # ~5 veces más que el resto del top 10 % a igual puesto, analysis/cart_age.py)
 ]
 K = len(FEATURES)
 FI = {name: i for i, name in enumerate(FEATURES)}
@@ -227,6 +231,7 @@ class Items:
             rank_sub[i] = seen_in_sub[self.sub[i]]
         self.static = np.stack([1 / np.sqrt(rank_sub), 1 - rank_glob / n, np.log(price)], axis=1).astype(np.float32)
         self.pop = pop
+        self.pop_log = (pop / 10).astype(np.float32)
         # Tablas de parecidos: `cf` es una sola (la de siempre) o un diccionario nombre -> tabla (ver cf_tables)
         tables = {} if cf is None else ({"": cf} if "products" in cf else cf)
         self.cfs = {name: CFTable(t, self, name) for name, t in tables.items()}
@@ -419,6 +424,7 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
     n = items.n
     F = np.zeros((n, K), np.float32)
     F[:, STATIC] = items.static
+    F[:, FI["pop_log"]] = items.pop_log
     F[:, FI["is_new_prod"]] = items.is_new
     F[:, FI["on_sale"]] = items.on_sale
 

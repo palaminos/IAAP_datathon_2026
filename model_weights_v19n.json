@@ -1,0 +1,165 @@
+{
+  "trained": "2026-11-14T22:11:59",
+  "C": 3.0,
+  "caps": {
+    "is_new_prod": 0.7
+  },
+  "options": {
+    "cf_fill": true,
+    "cf_file": ""
+  },
+  "segment": "new",
+  "base": "ninguna",
+  "live_responses": 28677,
+  "live_purchases": 601,
+  "test": {
+    "pesos actuales (solo histórico)": {
+      "logloss_compra": 0.016629287697655856,
+      "auc_compra": 0.7879442678704331,
+      "logloss_clic": 0.039647497062988854,
+      "auc_clic": 0.7335484498883235
+    },
+    "corregidos con hoy (C=3.0)": {
+      "logloss_compra": 0.014158589584766939,
+      "auc_compra": 0.9042083953636022,
+      "logloss_clic": 0.036944586093121554,
+      "auc_clic": 0.797684550630227
+    },
+    "solo con datos de hoy": {
+      "logloss_compra": 0.014140195757561131,
+      "auc_compra": 0.9021068945695927,
+      "logloss_clic": 0.03691052917704166,
+      "auc_clic": 0.7983693158894047
+    },
+    "v4 en producción": {
+      "logloss_compra": 0.016679608926053687,
+      "auc_compra": 0.7823374788457083,
+      "logloss_clic": 0.039416566831249125,
+      "auc_clic": 0.7314430387868895
+    },
+    "v10 en producción": {
+      "logloss_compra": 0.016152045773467273,
+      "auc_compra": 0.8016406104392568,
+      "logloss_clic": 0.03884823991377427,
+      "auc_clic": 0.7442626927591417
+    },
+    "v12 en producción": {
+      "logloss_compra": 0.014784517098861642,
+      "auc_compra": 0.879552440927614,
+      "logloss_clic": 0.03737320002293247,
+      "auc_clic": 0.786537406678864
+    },
+    "v13 en producción": {
+      "logloss_compra": 0.014430388195724335,
+      "auc_compra": 0.8971715529168228,
+      "logloss_clic": 0.03713853610719038,
+      "auc_clic": 0.7931048669517987
+    },
+    "v14 en producción": {
+      "logloss_compra": 0.014046220066834805,
+      "auc_compra": 0.9078252585405331,
+      "logloss_clic": 0.03691734517415406,
+      "auc_clic": 0.7962983141279625
+    },
+    "v14n en producción": {
+      "logloss_compra": 0.014172284934870879,
+      "auc_compra": 0.8996841348787203,
+      "logloss_clic": 0.036955217838490075,
+      "auc_clic": 0.7963193974675224
+    },
+    "v16 en producción": {
+      "logloss_compra": 0.014529914211790236,
+      "auc_compra": 0.896943704742505,
+      "logloss_clic": 0.03725675637440047,
+      "auc_clic": 0.7876282270842454
+    },
+    "v16n en producción": {
+      "logloss_compra": 0.014544684467270816,
+      "auc_compra": 0.8911082906622054,
+      "logloss_clic": 0.03738073258114839,
+      "auc_clic": 0.7887135342378889
+    },
+    "v17 en producción": {
+      "logloss_compra": 0.01430591925181649,
+      "auc_compra": 0.901029841192893,
+      "logloss_clic": 0.037259644183275986,
+      "auc_clic": 0.787001531049401
+    },
+    "v17n en producción": {
+      "logloss_compra": 0.014636008303242532,
+      "auc_compra": 0.8734517034009419,
+      "logloss_clic": 0.03692611988410781,
+      "auc_clic": 0.7982229238181369
+    },
+    "v18 en producción": {
+      "logloss_compra": 0.014021351769215372,
+      "auc_compra": 0.9084056258337139,
+      "logloss_clic": 0.036902246666840395,
+      "auc_clic": 0.7960223190836831
+    },
+    "v18n en producción": {
+      "logloss_compra": 0.013911368650907627,
+      "auc_compra": 0.9108300132757909,
+      "logloss_clic": 0.03678795346082716,
+      "auc_clic": 0.800454530204322
+    },
+    "v19 en producción": {
+      "logloss_compra": 0.01404902925597381,
+      "auc_compra": 0.9081426700254571,
+      "logloss_clic": 0.03690127154412374,
+      "auc_clic": 0.796559542523115
+    },
+    "v6 en producción": {
+      "logloss_compra": 0.016152045773467273,
+      "auc_compra": 0.8016406104392568,
+      "logloss_clic": 0.03884823991377427,
+      "auc_clic": 0.7442626927591417
+    },
+    "v8 en producción": {
+      "logloss_compra": 0.01617409139568051,
+      "auc_compra": 0.8023661805387694,
+      "logloss_clic": 0.03866854919451065,
+      "auc_clic": 0.7476342816874351
+    },
+    "v9 en producción": {
+      "logloss_compra": 0.016797004699444815,
+      "auc_compra": 0.7797859418379338,
+      "logloss_clic": 0.040528992006758684,
+      "auc_clic": 0.6985920097024365
+    }
+  },
+  "weights": {
+    "sub_share": 0.43338,
+    "sub_log": -0.07689,
+    "cat_share": 0.14495,
+    "brand_share": 0.01951,
+    "p_view": -0.61498,
+    "p_cart": 2.65049,
+    "p_buy": -3.81246,
+    "in_session": 0.70919,
+    "is_last": 0.99808,
+    "same_sub": -0.27946,
+    "same_cat": 0.53075,
+    "sess_sub_share": 0.7892,
+    "coview": -0.14698,
+    "pop_sub": -0.1213,
+    "pop_glob": 0.2284,
+    "log_price": -0.10682,
+    "mf": -0.45244,
+    "mf_z": 0.07691,
+    "cart_no_buy": 0.0,
+    "viewed_no_cart": 0.0,
+    "is_new_prod": 0.7,
+    "organic": 0.0,
+    "on_sale": 0.0,
+    "cf": 1.33873,
+    "cf_any": -0.34757,
+    "cf_sess": 0.50457,
+    "cf_sess_any": -0.10108,
+    "cf_view": -0.61877,
+    "cart_live": 0.38225,
+    "view_live": -0.61498,
+    "pop_log": 2.29951
+  },
+  "learned_is_new_prod": 1.0
+}
