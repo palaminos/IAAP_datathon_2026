@@ -21,6 +21,7 @@ import hashlib
 import json
 import math
 import os
+import queue
 import sys
 import threading
 import time
@@ -29,8 +30,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-import requests
+# Un solo hilo para numpy. Las operaciones de este programa son pequeñas: repartirlas en varios hilos no
+# acelera nada y, si el Mac está ocupado (p. ej. reentrenando a la vez), las frena unas 50 veces
+# (medido: de 0,6 ms a 30 ms por request). Tiene que ir ANTES de importar numpy.
+for _var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS"):
+    os.environ.setdefault(_var, "1")
+
+import numpy as np  # noqa: E402
+import requests  # noqa: E402
 
 import model
 from model import Items, UserStore
@@ -55,7 +62,9 @@ DRY_RUN = "--dry-run" in sys.argv
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
     "v6-similar-users": 50, # v4 + "usuarios parecidos" (train_mf.py) + carrito sin compra / visto sin carrito
-    "v4-live-weights": 50,  # v3 con los pesos corregidos con nuestro feedback en vivo (train_live.py)
+    "v7-explore": 50,       # sortea 10 entre los 40 mejores de v6 para aprender (solo en práctica: NO para la final)
+    # "v4-live-weights": 0, # v3 con pesos corregidos con el feedback en vivo. Empató con v6 en vivo (1,76 % vs
+    #                         1,77 %) y queda por debajo en la validación temporal (AUC 0,871 vs 0,886)
     # "v5-cart-first": 0,   # v4 + carritos abandonados arriba del todo: PERDIÓ contra v4 en vivo
     #                         (1,29 % vs 2,26 % de conversión, -38 % de clics, 14-nov). Forzar todos los
     #                         carritos desplaza productos mejores; v4 ya sube los que merecen la pena.
@@ -63,6 +72,13 @@ VARIANTS: dict[str, int] = {
     # "v2-user-lr": 0,      # iba por detrás de v3 en vivo (14-nov)
     # "v1-coview-trend": 0, # perdió contra v2 en vivo (0,53 % vs 1,13 % de conversión, 14-nov)
 }
+
+# Exploración (variantes cuyo nombre acaba en "-explore")
+EXPLORE_BASE = "v6"      # parte de las puntuaciones de esta versión
+EXPLORE_TOP = 40         # candidatos entre los que se sortea
+EXPLORE_T = 1.0          # temperatura: 1 = cada candidato sale en proporción a su probabilidad estimada de compra
+EXPLORE_DRAWS = 300      # sorteos extra para estimar la probabilidad de cada producto en cada puesto
+RNG = np.random.default_rng()
 
 # Pesos de v1 (puestos a mano)
 V1 = {"coview": 1.0, "subcat": 0.6, "cat": 0.25, "viewed": 0.3, "decay": 0.7}
@@ -359,6 +375,51 @@ def recommend_v2(req: Record, s: State, users: UserStore, coviews_idx: dict[int,
     return model.top10(score, s.items, blocked)
 
 
+def recommend_explore(req: Record, s: State, users: UserStore, coviews_idx: dict[int, list[int]], weights,
+                      blocked: set[str] = frozenset(), rng=RNG, T: float = EXPLORE_T,
+                      top: int = EXPLORE_TOP) -> tuple[list[str], Record | None]:
+    """Exploración: en vez de los 10 mejores, sortea 10 entre los `top` mejores (Plackett-Luce).
+
+    Para qué: nuestro feedback solo dice qué pasa con lo que el modelo ya decide enseñar, y en el puesto en
+    que lo pone. Aquí cada candidato sale con probabilidad proporcional a exp(puntuación / T), sin reemplazo,
+    y el orden del sorteo es el orden de la lista: se aleatoriza también la posición. Devuelve la lista y un
+    registro con las probabilidades, para corregir ese sesgo al reentrenar. Las reglas duras no cambian:
+    nada ya comprado, nada agotado."""
+    F = model.featurize(req.get("user_id") or "", req.get("recent_views"), s.items, users, coviews_idx)
+    score = (F @ weights).astype(np.float64)
+    score[F[:, model.FI["p_buy"]] > 0] = -np.inf
+    score[~s.items.avail] = -np.inf
+    for p in blocked:
+        i = model.PRODUCTS.idx.get(p)
+        if i is not None and i < len(score):
+            score[i] = -np.inf
+    k = min(top, len(score) - 1)
+    cand = np.argpartition(-score, k)[:k]
+    cand = cand[np.isfinite(score[cand])]
+    cand = cand[np.argsort(-score[cand], kind="stable")]
+    if len(cand) < 10:
+        return model.top10(score, s.items, blocked), None
+    z = score[cand] / T
+    z -= z.max()
+    # Plackett-Luce sin reemplazo = ordenar por puntuación + ruido de Gumbel. La fila 0 es la lista que se
+    # envía; las demás son sorteos de más para estimar con qué probabilidad sale cada producto en cada puesto.
+    order = np.argsort(-(z + rng.gumbel(size=(EXPLORE_DRAWS + 1, len(cand)))), axis=1)[:, :10]
+    pick, others = order[0], order[1:]
+    w = np.exp(z)
+    left, log_prob = float(w.sum()), 0.0
+    for j in pick:  # probabilidad exacta de la lista: producto de las probabilidades de cada extracción
+        log_prob += math.log(max(w[j] / left, 1e-300))
+        left = max(left - w[j], 1e-300)
+    names = model.PRODUCTS.names
+    log = {"feature_set": "explore_v1", "kind": "explore", "base": EXPLORE_BASE, "T": T,
+           "candidates": [names[i] for i in cand], "scores": [round(float(x), 4) for x in score[cand]],
+           "shown": [names[cand[j]] for j in pick], "log_prob_list": round(log_prob, 4),
+           # estimadas con EXPLORE_DRAWS sorteos: al usarlas como 1/p, acotar por abajo con 1/(2·EXPLORE_DRAWS)
+           "p_slot": [round(float(x), 4) for x in (others == pick[None, :]).mean(0)],
+           "p_any": [round(float(x), 4) for x in (others[:, :, None] == pick[None, None, :]).any(1).mean(0)]}
+    return log["shown"], log
+
+
 def valid(items: list[str], s: State, blocked: set[str]) -> list[str]:
     """Garantía final: 10 productos distintos, disponibles y no agotados; se rellena con populares."""
     out = list(dict.fromkeys(p for p in items if p in s.available and p not in blocked))[:10]
@@ -468,6 +529,7 @@ class Models:
     weights: Any = None        # model_weights.json (histórico)
     weights_live: Any = None   # model_weights_live.json (corregidos con el feedback en vivo)
     by_version: dict = field(default_factory=dict)   # "v6", "v7"... -> pesos de model_weights_v6.json, _v7.json...
+    explore_q: Any = None      # cola de registros de exploración pendientes de enviar a scratch
 
 
 def load_models() -> Models:
@@ -479,8 +541,9 @@ def load_models() -> Models:
     # Versiones posteriores (v6, v7...): cada una con su fichero de pesos model_weights_<versión>.json
     for f in sorted(model.WEIGHTS_FILE.parent.glob("model_weights_v*.json")):
         m.by_version[f.stem.removeprefix("model_weights_")] = model.load_weights(f)
+    m.explore_q = queue.Queue(maxsize=20_000)
     for v in VARIANTS:
-        prefix = v.split("-")[0]
+        prefix = EXPLORE_BASE if v.endswith("-explore") else v.split("-")[0]
         if prefix not in ("v1", "v2", "v3", "v4", "v5") and prefix not in m.by_version:
             print(f"AVISO: falta model_weights_{prefix}.json; {v} no puede funcionar")
     if not model.MF_FILE.exists():
@@ -496,7 +559,18 @@ def respond(req: Record, version: str, s: State, blocked: set[str], users: UserS
     """La respuesta a una request con la variante indicada. Nunca falla: si algo va mal, los más populares."""
     try:
         prefix = version.split("-")[0]
-        if not version.startswith("v1") and m.weights is not None:
+        if version.endswith("-explore"):
+            w = m.by_version.get(EXPLORE_BASE)
+            if w is None:
+                raise RuntimeError(f"faltan los pesos de {EXPLORE_BASE} para explorar")
+            items, log = recommend_explore(req, s, users, m.coviews_idx, w, blocked)
+            if log is not None and m.explore_q is not None:
+                log.update(request_id=req["request_id"], user_id=req.get("user_id"), model_version=version)
+                try:
+                    m.explore_q.put_nowait(log)
+                except queue.Full:   # el registro nunca frena ni rompe la respuesta
+                    pass
+        elif not version.startswith("v1") and m.weights is not None:
             w = m.weights_live if version.startswith(("v4", "v5")) and m.weights_live is not None else m.weights
             if prefix not in ("v2", "v3", "v4", "v5"):
                 if prefix not in m.by_version:
@@ -511,6 +585,26 @@ def respond(req: Record, version: str, s: State, blocked: set[str], users: UserS
         print(f"recommend falló ({e!r}), uso los más populares")
         version, items = "fallback-propio", []
     return {"request_id": req["request_id"], "items": valid(items, s, blocked), "model_version": version}
+
+
+def explore_logger(q: "queue.Queue") -> None:
+    """Hilo aparte: envía a team_NN.scratch los registros de exploración, por lotes. Si un envío falla, ese
+    lote se descarta y se avisa: las respuestas a los compradores nunca dependen de esto."""
+    session = requests.Session()
+    session.headers["Authorization"] = http.headers["Authorization"]
+    while True:
+        time.sleep(2)
+        batch: list[Record] = []
+        while len(batch) < 400:
+            try:
+                batch.append(q.get_nowait())
+            except queue.Empty:
+                break
+        if batch:
+            try:
+                session.post(f"{API}/v1/tables/scratch", params={"database": TEAM}, json=batch, timeout=10).raise_for_status()
+            except Exception as e:
+                print(f"registro de exploración fallido ({len(batch)} filas descartadas): {e!r}")
 
 
 def preflight() -> int:
@@ -544,6 +638,8 @@ def main() -> None:
     bg = Background(hist_pop)
     m = load_models()
     bg.start()
+    if not DRY_RUN and any(v.endswith("-explore") for v in VARIANTS):
+        threading.Thread(target=explore_logger, args=(m.explore_q,), daemon=True).start()
     print(f"listo: {len(bg.state.available)} productos disponibles. Variantes: {VARIANTS}")
 
     seen: dict[str, None] = {}  # dict = conjunto que recuerda el orden de llegada

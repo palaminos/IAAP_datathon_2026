@@ -52,6 +52,32 @@ class Basics(unittest.TestCase):
         self.assertNotIn("p012", rec.respond(reqs[0], "v3-no-rebuy", STATE, set(), users, m)["items"])   # ya comprado
         self.assertEqual(rec.respond(reqs[0], "v5-cart-first", STATE, set(), users, m)["items"][0], "p011")  # carrito primero
 
+    def test_explore_is_valid_random_and_logged(self):
+        users = model.UserStore(capacity=8)
+        users.add_event("u1", "p012", "purchase", STATE.items)
+        m = rec.Models({}, {}, WEIGHTS, WEIGHTS, {"v6": WEIGHTS})
+        m.explore_q = rec.queue.Queue()
+        req = {"request_id": "r1", "user_id": "u1", "recent_views": [{"product_id": "p010"}]}
+        outs = [rec.respond(req, "v7-explore", STATE, {"p020"}, users, m) for _ in range(5)]
+        for out in outs:
+            self.assertTrue(is_valid(out["items"], {"p020"}))
+            self.assertEqual(out["model_version"], "v7-explore")
+            self.assertNotIn("p012", out["items"])                                   # nunca lo ya comprado
+        self.assertGreater(len({tuple(o["items"]) for o in outs}), 1)                # el sorteo cambia la lista
+        log = m.explore_q.get_nowait()
+        self.assertEqual(log["kind"], "explore")
+        self.assertEqual(log["request_id"], "r1")
+        self.assertEqual(log["shown"], outs[0]["items"])
+        self.assertEqual(len(log["candidates"]), rec.EXPLORE_TOP)
+        self.assertEqual(len(log["scores"]), len(log["candidates"]))
+        self.assertTrue(set(log["shown"]) <= set(log["candidates"]))
+        self.assertNotIn("p012", log["candidates"])
+        self.assertNotIn("p020", log["candidates"])
+        self.assertEqual((len(log["p_slot"]), len(log["p_any"])), (10, 10))
+        self.assertTrue(all(0 <= x <= 1 for x in log["p_slot"] + log["p_any"]))
+        self.assertLess(log["log_prob_list"], 0)
+        self.assertEqual(m.explore_q.qsize(), 4)
+
     def test_split_is_stable_and_balanced(self):
         self.assertEqual(rec.pick_variant({"user_id": "u_1", "request_id": "a"}), rec.pick_variant({"user_id": "u_1", "request_id": "b"}))
         counts = Counter(rec.pick_variant({"user_id": f"u_{i}", "request_id": "x"}) for i in range(4000))
