@@ -84,9 +84,11 @@ SELECT if(f.served_by::String = 'team', s.model_version, 'fallback') AS version,
        100 * countIf(f.purchased != '') / count() AS conversion_pct,
        sum(f.revenue_eur::Float64) / count()      AS eur_per_request
 FROM {team}.feedback AS f
-LEFT JOIN (SELECT request_id::String AS request_id, any(model_version::String) AS model_version
-           FROM {team}.submissions GROUP BY request_id) AS s
-    ON s.request_id = f.request_id::String
+LEFT JOIN (SELECT request_id::String AS request_id, toJSONString(items) AS shown,
+                  any(model_version::String) AS model_version
+           FROM {team}.submissions GROUP BY request_id, shown) AS s
+    -- unir también por la lista mostrada: si una request tuvo dos respuestas, cuenta la que se vio
+    ON s.request_id = f.request_id::String AND s.shown = toJSONString(f.shown)
 WHERE f.request_id != '__init__' AND f.ts::DateTime64(3) > now() - INTERVAL {hours} HOUR
 GROUP BY version
 ORDER BY requests DESC"""
