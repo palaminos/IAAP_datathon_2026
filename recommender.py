@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import requests
 
 import model
@@ -52,8 +53,9 @@ DRY_RUN = "--dry-run" in sys.argv
 # para el mismo comprador). La clave es la etiqueta model_version que muestra `monitor.py conv`.
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
+    "v3-no-rebuy": 50,      # v2 + no recomendar lo que el usuario ya compró
     "v2-user-lr": 50,
-    "v1-coview-trend": 50,
+    # "v1-coview-trend": 0, # perdió contra v2 en vivo (0,53 % vs 1,13 % de conversión, 14-nov)
 }
 
 # Pesos de v1 (puestos a mano)
@@ -147,6 +149,13 @@ SELECT request_id, ts, user_id, is_new_user, context, recent_views
 FROM shop.requests
 ORDER BY ts DESC
 LIMIT 100"""
+
+CAROUSEL_PURCHASES = """
+SELECT r.user_id::String AS u, f.purchased::String AS p, toString(f.ts::DateTime64(3)) AS ts
+FROM {team}.feedback AS f INNER JOIN shop.requests AS r ON r.request_id::String = f.request_id::String
+WHERE f.purchased != '' AND f.ts::DateTime64(3) > '{since}'
+ORDER BY ts"""
+"""Lo que los usuarios nos han comprado a través del carrusel (para no volver a recomendárselo)."""
 
 NEW_EVENTS = """
 SELECT user_id::String AS u, product_id::String AS p, event_type::String AS t, toString(ts::DateTime64(3)) AS ts
@@ -273,10 +282,16 @@ def recommend_v1(req: Record, s: State, coviews: dict[str, list[str]], w: dict =
 
 
 def recommend_v2(req: Record, s: State, users: UserStore, coviews_idx: dict[int, list[int]], weights,
-                 blocked: set[str] = frozenset()) -> list[str]:
-    """v2: puntúa todos los productos (señales × pesos aprendidos) y se queda con los 10 mejores."""
+                 blocked: set[str] = frozenset(), skip_bought: bool = False) -> list[str]:
+    """v2: puntúa todos los productos (señales × pesos aprendidos) y se queda con los 10 mejores.
+
+    skip_bought (v3): descarta lo que el usuario ya compró. En el feedback real del 14-nov, un producto
+    ya comprado se volvió a comprar 8 veces menos que el resto (analysis/live_lift.py)."""
     F = model.featurize(req.get("user_id") or "", req.get("recent_views"), s.items, users, coviews_idx)
-    return model.top10(F @ weights, s.items, blocked)
+    score = F @ weights
+    if skip_bought:
+        score[F[:, model.FI["p_buy"]] > 0] = -np.inf
+    return model.top10(score, s.items, blocked)
 
 
 def valid(items: list[str], s: State, blocked: set[str]) -> list[str]:
@@ -300,6 +315,7 @@ class Background:
         self.blocked: set[str] = set()   # agotados según la última comprobación rápida
         self.users = UserStore()
         self.users_ready = False
+        self.feedback_watermark = "2000-01-01 00:00:00"   # último feedback con compra ya incorporado
 
     def start(self) -> None:
         threading.Thread(target=self._stock_loop, daemon=True).start()
@@ -342,6 +358,11 @@ class Background:
             self.users.add_event(r["u"], r["p"], r["t"], items)
         if rows:
             self.users.watermark = rows[-1]["ts"]
+        bought = query(CAROUSEL_PURCHASES.format(team=TEAM, since=self.feedback_watermark), timeout=60)
+        for r in bought:
+            self.users.add_event(r["u"], r["p"], "purchase", items)
+        if bought:
+            self.feedback_watermark = bought[-1]["ts"]
         return len(rows)
 
     def _slow_loop(self) -> None:
@@ -369,7 +390,7 @@ def main() -> None:
     bg = Background(hist_pop)
     coviews_idx = model.index_coviews(coviews)
     weights = model.load_weights() if model.WEIGHTS_FILE.exists() else None
-    if weights is None and "v2-user-lr" in VARIANTS:
+    if weights is None:
         print("AVISO: falta model_weights.json (ejecuta train.py); los compradores de v2 recibirán v1")
     bg.start()
     print(f"listo: {len(bg.state.available)} productos disponibles. Variantes: {VARIANTS}")
@@ -393,8 +414,9 @@ def main() -> None:
                     seen[req["request_id"]] = None
                     try:
                         version = pick_variant(req)
-                        if version.startswith("v2") and weights is not None:
-                            items = recommend_v2(req, s, bg.users, coviews_idx, weights, blocked)
+                        if version.startswith(("v2", "v3")) and weights is not None:
+                            items = recommend_v2(req, s, bg.users, coviews_idx, weights, blocked,
+                                                 skip_bought=version.startswith("v3"))
                         else:
                             version = version if version.startswith("v1") else "v1-coview-trend"
                             items = recommend_v1(req, s, coviews)
