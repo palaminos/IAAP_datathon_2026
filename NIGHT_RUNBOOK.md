@@ -65,7 +65,10 @@ Diario: `logs/night_report.md`. Estado: `logs/night_state.json` (campeona, retad
 | 20:35-21:05 | v6 32 · v8 17 · v12 17 · v10 17 · v9 17 (sin internet de 20:46 a 20:56) | c60d19f |
 | 21:05-21:20 | v8 32 (campeona, decisión de tarre) · v12 19 · v13 19 · v9 18 · v6 12; bucle con hilos | fce3bb0 |
 | 21:20-21:55 | v8 28 · v12 20 · v13 20 · v14 20 · v6 12 | 86b9f96 |
-| 22:00- | v8 30 (control) · v14 19 · v17 19 · v18 19 · v12 13 | b41e021 |
+| 22:00-22:28 | v8 30 (control) · v14 19 · v17 19 · v18 19 · v12 13 | b41e021 |
+| 22:30-23:19 | v14 30 (CAMPEONA) · v17 25 · v13 25 · v8 10 · v18 10 | 36b8a6b |
+| 23:20-00:23 | v14 25 · v13 20 · v20 20 · v21 20 · v17 15 (sin red 23:51-23:58 y 00:07-00:14) | 9fe5af5 |
+| 00:25- | v14 30 · v22-cart-top 25 · v23-pop-log 25 · v20 20 | ad27e8e |
 
 Qué es cada versión:
 - **v8** (campeona nominal por decisión de tarre, y control): v6 reentrenado + señal de producto nuevo. Empatada con v6.
@@ -111,11 +114,11 @@ Otros datos útiles:
 
 | # | Idea | Estado |
 |---|---|---|
-| A | Ronda 3: v14, v17, v18 y v12 frente a v8. Promocionar a campeona la mejor con z ≥ +2 y 3.000 requests (se espera que sea v14 o una de sus hijas); retirar con z ≤ -2. Cuando v14 sea campeona, v17 y v18 se comparan CON ELLA (cambiar `champion` y quitar `control` en `night_state.json`) | En marcha desde las 22:00 |
-| B | `v19` = v14 + EASE + señales del evento en una sola versión, si v17 y v18 no salen peor que v14. Entrenar: `analysis/live_matrix.py --cf-fill --cf-file cf_ease.npz --save-as live_matrix_ease.npz` y `train_live.py --matrix --matrix-file live_matrix_ease.npz --cf-file cf_ease.npz --cf-fill --segment ...` (sin quitar `cart_live` ni `view_live`) | Pendiente (hacia las 00:00) |
-| C | Reentrenar la mejor receta con el feedback de la noche (hacia la 01:00 y hacia las 05:00): habrá miles de respuestas de las versiones con parecidos. Cada reentreno entra como retadora con nombre nuevo, nunca sustituye a ciegas | Pendiente |
-| D | Compradores conocidos: seguimos en ~1,5 % y la referencia saca 2,1 %. El 72 % de sus compras sale de productos que tenían en el carrito: mirar qué distingue a los carritos que acaban en compra (antigüedad en días, nº de veces, precio) con el histórico | Pendiente; es donde más hay que ganar |
-| E | Ronda final (desde ~05:30): las 2 mejores con mucho tráfico cada una (p. ej. 50/50) para decidir con margen pequeño | Pendiente |
+| A | Ronda 6 (desde las 00:25): **v22-cart-top** frente a v14 (mismos pesos; con conocidos el mejor carrito va primero) y **v23-pop-log** frente a v20 (misma receta y datos; popularidad en escala log). Promocionar con z ≥ +2 y 3.000 requests; retirar con z ≤ -2. Si v22 gana, probar también `cart_top: "all"` (compradores nuevos incluidos) | En marcha |
+| B | Si v22 y v23 ganan, juntarlas en una (pesos de v23 + `cart_top`) y validarla como retadora | Pendiente |
+| C | Último reentreno hacia las 05:00 con la receta ganadora (`analysis/live_matrix.py --cf-fill` + `train_live.py`), como retadora con nombre nuevo. Ojo: reentrenar con 3 h más de datos no cambió nada a las 23:15; solo merece la pena si cambia la receta | Pendiente |
+| D | Ronda final (desde ~06:00): las 2 mejores al 50 % cada una | Pendiente |
+| E | Ya contestadas: pesos separados o un solo juego dan lo mismo (v13 = v14); EASE da lo mismo que el coseno en vivo (v17 = v14); las señales del evento no ayudan (v18); reentrenar no cambia (v20, v21) | Cerradas |
 | F | Descartadas esta noche tras probarlas offline: modelo de árboles, logit condicional, base del histórico sin recompras (sale igual), tabla de parecidos con eventos de hoy (sin diferencia medible), subir el peso de productos nuevos, empujar rebajas | Cerradas |
 
 ## Último despertar antes de la final (08:30-09:15)
