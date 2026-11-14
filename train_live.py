@@ -42,11 +42,13 @@ V6 = NAME is not None
 DROP = [model.FI[n] for n in (_arg("--drop") or "").split(",") if n]
 OUT = model.WEIGHTS_FILE.with_name(f"model_weights_{NAME}.json" if NAME else "model_weights_live.json")
 LIVE = """
-SELECT r.user_id::String AS u, toUnixTimestamp64Milli(r.ts::DateTime64(3)) AS ms,
+SELECT f.request_id::String AS rid, r.user_id::String AS u, toUnixTimestamp64Milli(r.ts::DateTime64(3)) AS ms,
        arrayMap(x -> x.product_id::String, r.recent_views::Array(JSON)) AS rv,
        f.shown::Array(String) AS shown, f.clicked::String AS clicked, f.purchased::String AS purchased
 FROM {team}.feedback AS f INNER JOIN shop.requests AS r ON r.request_id::String = f.request_id::String
 WHERE f.served_by::String = 'team' AND cityHash64(f.request_id::String) % 4 = {i}"""
+EXPLORED = "SELECT request_id::String AS rid FROM {team}.scratch WHERE feature_set::String = 'explore_v1'"
+"""Requests respondidas por la variante de exploración (listas sorteadas, no las 10 mejores)."""
 EVENTS = """
 SELECT user_id::String AS u, product_id::String AS p, event_type::String AS t, toUnixTimestamp64Milli(ts::DateTime64(3)) AS ms
 FROM shop.events
@@ -68,7 +70,11 @@ def live_examples():
 
     start = dt.datetime.fromisoformat(rec.query("SELECT toString(toStartOfHour(min(ts::DateTime64(3)))) AS d FROM shop.events")[0]["d"])
     hour, events, e = start, [], 0
-    X, slot, click, buy, when = [], [], [], [], []
+    X, slot, click, buy, when, explored = [], [], [], [], [], []
+    try:
+        explore_ids = {r["rid"] for r in rec.query(EXPLORED.format(team=rec.TEAM), timeout=120)}
+    except Exception:   # aún no hay registros de exploración
+        explore_ids = set()
     for r in reqs:
         limit = int(r["ms"]) - LAG_MS
         while True:  # incorporar a la memoria todos los eventos anteriores a esta request
@@ -83,11 +89,17 @@ def live_examples():
         idx = [model.PRODUCTS.idx[p] for p in r["shown"]]
         X.append(model.featurize(r["u"], [{"product_id": p} for p in r["rv"]], items, users, cov_idx)[idx])
         slot.append(np.arange(10)), when.append(np.full(10, int(r["ms"])))
+        explored.append(np.full(10, r.get("rid") in explore_ids))
         click.append([p == r["clicked"] for p in r["shown"]]), buy.append([p == r["purchased"] for p in r["shown"]])
         if r["purchased"]:  # lo comprado en nuestro carrusel también entra en la memoria
             users.add_event(r["u"], r["purchased"], "purchase", items)
     c = np.concatenate
+    global EXPLORED_ROWS
+    EXPLORED_ROWS = c(explored).astype(bool)   # filas que vienen de listas sorteadas (v7-explore)
     return c(X), c(slot), c(click).astype(bool), c(buy).astype(bool), c(when)
+
+
+EXPLORED_ROWS = np.zeros(0, bool)
 
 
 def onehot(slot):
@@ -152,6 +164,21 @@ def main() -> None:
         (llb, aucb), (llc, aucc) = judge(w, L, tr | va, te, "buy"), judge(w, L, tr | va, te, "click")
         res[name] = {"logloss_compra": llb, "auc_compra": aucb, "logloss_clic": llc, "auc_clic": aucc}
         print(f"  {name:<34} compra: log-loss {llb:.5f} AUC {aucb:.4f} | clic: log-loss {llc:.5f} AUC {aucc:.4f}")
+    # Solo las listas SORTEADAS: ahí el producto y su puesto no los eligió el modelo, así que es la medida
+    # más limpia de si los pesos ordenan bien (sin el sesgo de "solo vemos lo que ya enseñamos").
+    ex = EXPLORED_ROWS if len(EXPLORED_ROWS) == len(X) else np.zeros(len(X), bool)
+    print(f"\nexploración: {int(ex.sum()) // 10} respuestas sorteadas en total, {int(buy[ex].sum())} compras, {int(click[ex].sum())} clics")
+    if buy[te & ex].sum() >= 10:
+        print(f"SOLO EXPLORACIÓN dentro de la prueba ({int(buy[te & ex].sum())} compras, {int(click[te & ex].sum())} clics):")
+        for name, w in cands.items():
+            (llb, aucb), (llc, aucc) = judge(w, L, tr | va, te & ex, "buy"), judge(w, L, tr | va, te & ex, "click")
+            res[name].update(explore_auc_compra=aucb, explore_auc_clic=aucc)
+            print(f"  {name:<34} compra: log-loss {llb:.5f} AUC {aucb:.4f} | clic: log-loss {llc:.5f} AUC {aucc:.4f}")
+    if click[ex].sum() >= 100:   # efecto de la posición medido con listas sorteadas (clics: hay más que compras)
+        Z = np.hstack([(X[ex] @ current)[:, None], onehot(slot[ex])])
+        lr = LogisticRegression(C=10.0, max_iter=2000).fit(Z, click[ex])
+        print("efecto de la posición en vivo (clics, puesto 1 = 1,00): "
+              + "  ".join(f"{k + 1}:{np.exp(v):.2f}" for k, v in enumerate(np.concatenate([[0.0], lr.coef_[0][1:]]))))
 
     # 3) pesos finales: histórico + corrección con TODO el feedback de hoy
     final, base = fit_corrected(current, L, np.ones(len(X), bool), best_C)
