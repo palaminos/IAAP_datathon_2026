@@ -17,6 +17,7 @@ Si algo falla, se responde con los más populares: nunca se deja una request sin
 """
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import math
@@ -52,7 +53,9 @@ http.headers["Authorization"] = f"Bearer {os.environ['RAWTREE_API_KEY']}"
 
 REFRESH_S = 60          # catálogo, popularidad en vivo y memoria de usuarios
 STOCK_S = 2             # productos agotados
-POLL_S = 0.3            # cada cuánto se leen requests nuevas
+POLL_S = 0.2            # pausa de cada lector entre dos lecturas de requests nuevas
+POLLERS = 2             # lectores en paralelo (cada uno con su conexión): si una lectura se cuelga, el otro sigue
+PUSHERS = 2             # hilos que envían las respuestas: un envío lento no frena la lectura siguiente
 COVIEW_DAYS = 21        # días de histórico usados para co-vistas
 CACHE = Path("cache")
 DRY_RUN = "--dry-run" in sys.argv
@@ -61,14 +64,16 @@ DRY_RUN = "--dry-run" in sys.argv
 # para el mismo comprador). La clave es la etiqueta model_version que muestra `monitor.py conv`.
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
-    # Ronda 1 de la noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12, así que esta
-    # noche se reparte el tráfico para APRENDER: la campeona con un tercio y cuatro candidatas serias.
-    "v6-similar-users": 32, # campeona: la mejor validada hasta ahora (v4 + "usuarios parecidos")
-    "v8-new-products": 17,  # v6 reentrenado con más feedback + señal de producto nuevo (tope 0,4)
-    "v12-cf": 17,           # v8 + filtrado colaborativo: parecido a lo que el comprador metió en el carrito o compró
-    "v10-sale": 17,         # v6 + empujón a los productos rebajados (0,8). Sin rebajas es idéntica a v6: mide el ruido
-    "v9-organic": 17,       # segunda oportunidad (la pidió tarre): perdió con solo 1.300 requests (z = -2,0)
+    # Noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12: esta noche el tráfico se
+    # reparte para APRENDER qué versión es la mejor.
+    "v8-new-products": 32,  # CAMPEONA desde las 21:15 (decisión de tarre): v6 reentrenado + señal de producto nuevo
+    "v12-cf": 19,           # v8 + parecido con lo que el comprador metió en el carrito o compró
+    "v13-cf-session": 19,   # v12 + parecido con lo que acaba de ver en la sesión y con lo que vio otros días
+    "v9-organic": 18,       # segunda oportunidad (la pidió tarre): perdió con solo 1.300 requests (z = -2,0)
+    "v6-similar-users": 12, # campeona anterior, como control: v8 le saca +0,16 puntos pero con z = +1,3 (no demostrado)
     # Retiradas (conversión esperada del leaderboard, misma ventana):
+    #   v10-sale        v6 + empujón de 0,8 a los rebajados: +0,07 (z = +0,5) casi todo fuera de rebajas; con los
+    #                   datos de hoy el peso aprendido de "rebajado" sale -0,15 -> el empujón no tiene base
     #   v5-cart-first   1,24 % frente a 1,53 % de v4 (z = -3,0)  -> no usar
     #   v4-live-weights 1,53 % frente a 1,66 % de v6 (z = -2,5)
     #   v7-explore / v7b-explore-v6: sorteos para aprender; bajan la conversión. Solo si se decide a propósito
@@ -100,14 +105,21 @@ def pick_variant(req: Record) -> str:
     return next(iter(VARIANTS))
 
 
-def query(sql: str, timeout: float = 30) -> list[Record]:
-    r = http.post(f"{API}/v1/query", json={"sql": sql}, timeout=timeout)
+def new_session() -> requests.Session:
+    """Conexión propia para un hilo (misma clave). Así un hilo colgado no bloquea a los demás."""
+    session = requests.Session()
+    session.headers["Authorization"] = http.headers["Authorization"]
+    return session
+
+
+def query(sql: str, timeout: float = 30, session: requests.Session | None = None) -> list[Record]:
+    r = (session or http).post(f"{API}/v1/query", json={"sql": sql}, timeout=timeout)
     if not r.ok:
         raise RuntimeError(f"{r.status_code}: {r.text[:300]}")
     return r.json()["data"]
 
 
-def push(answers: list[Record]) -> None:
+def push(answers: list[Record], session: requests.Session | None = None) -> None:
     """Inserción por lotes en team_NN.submissions."""
     if DRY_RUN:
         return
@@ -116,7 +128,7 @@ def push(answers: list[Record]) -> None:
     # reintento duplica la fila con la misma lista: no pasa nada, solo cuenta una.
     for attempt in (1, 2, 3):
         try:
-            http.post(f"{API}/v1/tables/submissions", params={"database": TEAM}, json=answers, timeout=4).raise_for_status()
+            (session or http).post(f"{API}/v1/tables/submissions", params={"database": TEAM}, json=answers, timeout=4).raise_for_status()
             return
         except Exception as e:
             print(f"envío fallido (intento {attempt} de 3, {len(answers)} respuestas): {e!r}")
@@ -619,6 +631,41 @@ def explore_logger(q: "queue.Queue") -> None:
                 print(f"registro de exploración fallido ({len(batch)} filas descartadas): {e!r}")
 
 
+def age_s(req: Record) -> float:
+    """Segundos desde el ts de la request hasta ahora (según el reloj de este portátil). Solo para el log."""
+    try:
+        ts = dt.datetime.fromisoformat(str(req["ts"])[:23]).replace(tzinfo=dt.timezone.utc)
+        return time.time() - ts.timestamp()
+    except Exception:
+        return 0.0
+
+
+def poller(inbox: "queue.Queue", delay: float) -> None:
+    """Hilo lector: pide las últimas requests una y otra vez y las deja en `inbox`. Nunca termina."""
+    session = new_session()
+    time.sleep(delay)   # los lectores van escalonados
+    while True:
+        try:
+            inbox.put(query(NEW_REQUESTS, timeout=3, session=session))
+        except Exception as e:
+            print(f"error: {e}")
+            session = new_session()   # conexión nueva: la anterior puede haberse quedado colgada
+            time.sleep(0.3)
+        time.sleep(POLL_S)
+
+
+def pusher(outbox: "queue.Queue") -> None:
+    """Hilo emisor: envía los lotes de respuestas. Nunca termina."""
+    session = new_session()
+    while True:
+        answers = outbox.get()
+        try:
+            push(answers, session)
+        except Exception as e:
+            print(f"error: {e}")
+            session = new_session()
+
+
 def preflight() -> int:
     """Comprobación antes de un despliegue: carga todo y responde a 100 requests reales con CADA variante,
     sin enviar nada. Devuelve 0 si todo es válido (lo usa deploy.sh)."""
@@ -665,26 +712,54 @@ def main() -> None:
         print(f"{len(seen)} requests recientes ya tenían respuesta: no se repiten")
     except Exception as e:
         print(f"no se pudo leer lo ya respondido ({e}); sigo igualmente")
+    # Tres tipos de hilo, para que nada espere a nada:
+    #   lectores  -> leen las requests nuevas y las dejan en `inbox`
+    #   este hilo -> calcula las respuestas (es el único que decide qué está ya respondido)
+    #   emisores  -> envían cada lote a RawTree
+    inbox: "queue.Queue[list[Record]]" = queue.Queue()
+    outbox: "queue.Queue[list[Record]]" = queue.Queue()
+
+    def start_threads() -> list[threading.Thread]:
+        threads = [threading.Thread(target=poller, args=(inbox, k * POLL_S / POLLERS), daemon=True) for k in range(POLLERS)]
+        threads += [threading.Thread(target=pusher, args=(outbox,), daemon=True) for _ in range(PUSHERS)]
+        for t in threads:
+            t.start()
+        return threads
+
+    threads = start_threads()
     answered = 0
+    ages: list[float] = []   # segundos entre el ts de cada request y el momento de responderla
     while True:
         try:
-            fresh = [r for r in query(NEW_REQUESTS, timeout=5) if r["request_id"] not in seen]
+            try:
+                rows = inbox.get(timeout=10)
+            except queue.Empty:   # 10 s sin ninguna lectura: no debería pasar nunca
+                dead = sum(not t.is_alive() for t in threads)
+                print(f"AVISO: 10 s sin lecturas de requests ({dead} hilos caídos de {len(threads)})")
+                if dead:
+                    threads = start_threads()
+                continue
+            fresh = [r for r in rows if r["request_id"] not in seen]
             if fresh:
                 s, blocked = bg.state, bg.blocked
                 answers = []
                 for req in fresh:
                     seen[req["request_id"]] = None
                     answers.append(respond(req, pick_variant(req), s, blocked, bg.users, m))
-                push(answers)
+                outbox.put(answers)
                 answered += len(answers)
+                ages += [age_s(req) for req in fresh]
                 if answered % 300 < len(answers):
-                    print(f"{answered} respondidas" + (f" | ejemplo {answers[-1]}" if DRY_RUN else ""))
+                    ages.sort()
+                    print(f"{answered} respondidas | edad de la request al responder: mediana {ages[len(ages) // 2]:.2f} s, "
+                          f"p99 {ages[int(len(ages) * 0.99)]:.2f} s | lotes en cola de envío: {outbox.qsize()}"
+                          + (f" | ejemplo {answers[-1]}" if DRY_RUN else ""))
+                    ages = []
             if len(seen) > 50_000:  # no crecer sin límite durante toda la noche
                 seen = dict.fromkeys(list(seen)[-10_000:])  # conserva las más recientes
         except Exception as e:  # sigue vivo: los compradores no paran
             print(f"error: {e}")
-            time.sleep(1)
-        time.sleep(POLL_S)
+            time.sleep(0.2)
 
 
 if __name__ == "__main__":

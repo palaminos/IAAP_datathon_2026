@@ -21,17 +21,21 @@ from monitor import query
 PAIRS = """
 SELECT a.p AS p, b.p AS q, count() AS n
 FROM (SELECT DISTINCT user_id::String AS u, product_id::String AS p FROM shop.history_events
-      WHERE event_type::String IN ('purchase', 'add_to_cart')) AS a
+      WHERE event_type::String IN ('purchase', 'add_to_cart') {cond}) AS a
 INNER JOIN (SELECT DISTINCT user_id::String AS u, product_id::String AS p FROM shop.history_events
-            WHERE event_type::String IN ('purchase', 'add_to_cart')) AS b ON a.u = b.u
+            WHERE event_type::String IN ('purchase', 'add_to_cart') {cond}) AS b ON a.u = b.u
 WHERE a.p != b.p GROUP BY p, q HAVING n >= 2 ORDER BY n DESC LIMIT 100 BY p"""
 COUNTS = """SELECT product_id::String AS p, uniqExact(user_id::String) AS n FROM shop.history_events
-WHERE event_type::String IN ('purchase', 'add_to_cart') GROUP BY p"""
+WHERE event_type::String IN ('purchase', 'add_to_cart') {cond} GROUP BY p"""
 
-if __name__ == "__main__":
-    t0 = time.time()
-    cnt = {r["p"]: float(r["n"]) for r in query(COUNTS, timeout=600)}
-    pairs = query(PAIRS, timeout=900)
+
+def build(until: str | None = None) -> dict:
+    """Similitud producto-producto con los carritos y compras del histórico (anteriores a `until`, si se da:
+    así se puede entrenar con el histórico sin usar información posterior a cada carrusel)."""
+    from scipy.sparse import csr_matrix
+    cond = f"AND ts::DateTime64(3) < '{until}'" if until else ""
+    cnt = {r["p"]: float(r["n"]) for r in query(COUNTS.format(cond=cond), timeout=600)}
+    pairs = query(PAIRS.format(cond=cond), timeout=900)
     products = sorted(cnt)
     pi = {p: i for i, p in enumerate(products)}
     i = np.array([pi[r["p"]] for r in pairs], np.int32)
@@ -40,10 +44,19 @@ if __name__ == "__main__":
     # Escala: que la similitud total típica de un producto "relacionado" quede en torno a 1 tras log1p.
     # Se estima con la suma de similitudes de 25 productos al azar (un usuario medio tiene ~25 en carrito/compra).
     rng = np.random.default_rng(0)
-    from scipy.sparse import csr_matrix
     S = csr_matrix((v, (i, j)), shape=(len(products), len(products)))
     sums = np.concatenate([np.asarray(S[rng.choice(len(products), 25, replace=False)].sum(0)).ravel() for _ in range(200)])
     scale = float((np.e - 1) / np.median(sums[sums > 0]))
-    np.savez_compressed(model.CF_FILE, products=np.array(products), i=i, j=j, v=v, scale=np.float32(scale))
-    print(f"{len(products)} productos, {len(v)} pares, similitud mediana {np.median(v):.3f}, escala {scale:.1f} "
-          f"({time.time() - t0:.0f}s) -> {model.CF_FILE.name}")
+    return {"products": products, "i": i, "j": j, "v": v, "scale": scale}
+
+
+def save(cf: dict, path) -> None:
+    np.savez_compressed(path, products=np.array(cf["products"]), i=cf["i"], j=cf["j"], v=cf["v"], scale=np.float32(cf["scale"]))
+
+
+if __name__ == "__main__":
+    t0 = time.time()
+    cf = build()
+    save(cf, model.CF_FILE)
+    print(f"{len(cf['products'])} productos, {len(cf['v'])} pares, similitud mediana {np.median(cf['v']):.3f}, "
+          f"escala {cf['scale']:.1f} ({time.time() - t0:.0f}s) -> {model.CF_FILE.name}")

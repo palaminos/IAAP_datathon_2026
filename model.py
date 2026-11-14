@@ -51,6 +51,10 @@ FEATURES = [
     # --- añadidas en v12 ---
     "cf",              # filtrado colaborativo: parecido a lo que el usuario metió en el carrito o compró (train_cf.py)
     "cf_any",          # 1 si tiene algún parecido con eso (los que no tienen ninguno casi nunca se compran)
+    # --- añadidas en v13 ---
+    "cf_sess",         # el mismo parecido, pero con los productos que acaba de ver en esta sesión (recent_views)
+    "cf_sess_any",     # 1 si se parece a algo de la sesión
+    "cf_view",         # el mismo parecido, con lo que vio otros días sin llegar a meterlo en el carrito
 ]
 K = len(FEATURES)
 FI = {name: i for i, name in enumerate(FEATURES)}
@@ -381,6 +385,9 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
                     sim = np.asarray(items.cf[liked].sum(0)).ravel()
                     F[:, FI["cf"]] = np.log1p(items.cf_scale * sim)
                     F[:, FI["cf_any"]] = sim > 0
+                seen_only = [i for i, packed in list(mine.items()) if i < n and not ((packed >> 20) & MASK or packed >> 40)]
+                if seen_only:
+                    F[:, FI["cf_view"]] = np.log1p(items.cf_scale * np.asarray(items.cf[seen_only].sum(0)).ravel())
         if users.mf is not None and items.mfV is not None and row < len(users.mf):
             vec = users.mf[row]
             known = items.mf_known
@@ -406,6 +413,10 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
         F[:, 9] = items.sub == items.sub[last]
         F[:, 10] = items.cat == items.cat[last]
         F[:, 11] = np.bincount(items.sub[idx], minlength=items.nsub)[items.sub] / len(idx)
+        if items.cf is not None:
+            sim = np.asarray(items.cf[sorted(set(idx))].sum(0)).ravel()
+            F[:, FI["cf_sess"]] = np.log1p(items.cf_scale * sim)
+            F[:, FI["cf_sess_any"]] = sim > 0
         for k, p in enumerate(reversed(idx[-10:])):  # la vista más reciente pesa más
             decay = 0.7 ** k
             for rank, q in enumerate(coviews.get(p, ())):

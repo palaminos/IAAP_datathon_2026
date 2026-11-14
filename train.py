@@ -121,7 +121,14 @@ def history_examples():
     # Catálogo, popularidad y co-vistas tal como se conocían en la fecha de corte
     rows = rec.query(rec.CATALOG.format(updates=""))
     product = {r["product_id"]: r for r in rows}
-    state = rec.make_state(product, set(product), rec.hist_popularity(until), {})
+    cf = None
+    if "--cf" in sys.argv:   # similitud entre productos calculada SOLO con lo anterior a la fecha de corte
+        import train_cf
+        path = rec.CACHE / f"cf_sim_until_{cut}.npz"
+        if not path.exists():
+            train_cf.save(train_cf.build(until), path)
+        cf = model.load_cf(path)
+    state = rec.make_state(product, set(product), rec.hist_popularity(until), {}, cf=cf)
     items = state.items
     coviews = rec.load_coviews(until)
     cov_idx = model.index_coviews(coviews)
@@ -170,12 +177,15 @@ def main() -> None:
     for name, w in sorted(zip(model.FEATURES, final), key=lambda t: -abs(t[1])):
         print(f"  {name:<16}{w:>9.3f}")
     if "--no-save" not in sys.argv:
-        model.WEIGHTS_FILE.write_text(json.dumps({
+        # --out hist13 guarda en model_weights_hist13.json (no pisa model_weights.json, que usan v2 y v3 y es la
+        # base de las correcciones en vivo de v4...v12)
+        out = model.WEIGHTS_FILE.with_name(f"model_weights_{sys.argv[sys.argv.index('--out') + 1]}.json") if "--out" in sys.argv else model.WEIGHTS_FILE
+        out.write_text(json.dumps({
             "trained": dt.datetime.now().isoformat(timespec="seconds"), "target": target,
             "train_window": [str(cut), str(cut + dt.timedelta(14))],
             "offline_eval_test_week": res,
             "weights": {name: round(float(w), 5) for name, w in zip(model.FEATURES, final)}}, indent=2, ensure_ascii=False))
-        print(f"\nguardado {model.WEIGHTS_FILE.name}")
+        print(f"\nguardado {out.name}")
 
 
 if __name__ == "__main__":
