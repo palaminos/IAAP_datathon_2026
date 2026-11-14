@@ -37,11 +37,27 @@ FEATURES = [
     "pop_sub",         # 1/sqrt(posición en ventas dentro de su subcategoría)
     "pop_glob",        # posición en ventas global (1 = el más vendido, 0 = el menos)
     "log_price",       # log(precio)
+    # --- añadidas en v6 (las versiones anteriores las tienen con peso 0) ---
+    "mf",              # afinidad por "usuarios parecidos" (factorización usuario × producto, train_mf.py)
+    "mf_z",            # la misma, normalizada dentro del usuario (cuánto destaca este producto para él)
+    "cart_no_buy",     # 1 si lo metió en el carrito y no lo ha comprado
+    "viewed_no_cart",  # 1 si lo ha visto pero nunca lo metió en el carrito ni lo compró
 ]
 K = len(FEATURES)
 FI = {name: i for i, name in enumerate(FEATURES)}
-N_STATIC = 3  # las últimas columnas no dependen de la request
+STATIC = slice(FI["pop_sub"], FI["pop_sub"] + 3)  # columnas que no dependen de la request
 WEIGHTS_FILE = Path(__file__).with_name("model_weights.json")
+MF_FILE = Path(__file__).with_name("mf_factors.npz")
+EVENT_MF = {"view": math.log1p(1), "add_to_cart": math.log1p(3), "purchase": math.log1p(5)}
+
+
+def load_mf(path: Path = MF_FILE) -> dict | None:
+    """Factores de usuarios y productos (train_mf.py). None si no existe el fichero."""
+    if not path.exists():
+        return None
+    d = np.load(path)
+    return {"V": dict(zip(d["products"].tolist(), d["V"])), "users": d["users"].tolist(), "U": d["U"].astype(np.float32),
+            "k": d["V"].shape[1]}
 MASK = (1 << 20) - 1  # contadores vistas/carritos/compras empaquetados en un entero
 
 
@@ -69,7 +85,8 @@ PRODUCTS, SUBS, CATS, BRANDS = Index(), Index(), Index(), Index()
 class Items:
     """El catálogo como columnas numéricas alineadas con PRODUCTS. Se reconstruye en cada refresco."""
 
-    def __init__(self, product: dict[str, dict], popularity: dict[str, float], available: set[str]):
+    def __init__(self, product: dict[str, dict], popularity: dict[str, float], available: set[str],
+                 mf: dict | None = None):
         for pid, info in product.items():
             PRODUCTS.add(pid), SUBS.add(info["subcategory"]), CATS.add(info["category"]), BRANDS.add(info.get("brand") or "")
         n = self.n = len(PRODUCTS)
@@ -105,6 +122,14 @@ class Items:
             rank_sub[i] = seen_in_sub[self.sub[i]]
         self.static = np.stack([1 / np.sqrt(rank_sub), 1 - rank_glob / n, np.log(price)], axis=1).astype(np.float32)
         self.pop = pop
+        # Factores de cada producto para la señal de "usuarios parecidos" (ceros si es nuevo: aún no los tiene)
+        self.mfV = None
+        if mf is not None:
+            self.mfV = np.zeros((n, mf["k"]), np.float32)
+            for pid, v in mf["V"].items():
+                i = PRODUCTS.idx.get(pid)
+                if i is not None:
+                    self.mfV[i] = v
 
 
 class UserStore:
@@ -116,6 +141,17 @@ class UserStore:
         self.brand = np.zeros((capacity, cols), np.uint16)
         self.prod: dict[int, dict[int, int]] = {}   # fila de usuario -> {producto: contadores empaquetados}
         self.watermark = ""                          # último ts de shop.events ya incorporado
+        self.mf: np.ndarray | None = None            # factores de "usuarios parecidos" por usuario
+
+    def init_mf(self, mf: dict | None) -> None:
+        """Carga los factores del histórico. Llamar después de cargar el historial y antes de los eventos de hoy."""
+        if mf is None:
+            return
+        self.mf = np.zeros((len(self.sub), mf["k"]), np.float32)
+        for uid, vec in zip(mf["users"], mf["U"]):
+            r = self.row.get(uid)
+            if r is not None:
+                self.mf[r] = vec
 
     def _row(self, uid: str) -> int:
         r = self.row.get(uid)
@@ -124,6 +160,8 @@ class UserStore:
             if r >= len(self.sub):  # doblar capacidad
                 self.sub = np.concatenate([self.sub, np.zeros_like(self.sub)])
                 self.brand = np.concatenate([self.brand, np.zeros_like(self.brand)])
+                if self.mf is not None:
+                    self.mf = np.concatenate([self.mf, np.zeros_like(self.mf)])
             self.row[uid] = r
         return r
 
@@ -149,10 +187,14 @@ class UserStore:
         shift = 0 if etype == "view" else 20 if etype == "add_to_cart" else 40
         if i in d or shift or len(d) < 80:  # tope por usuario para no gastar memoria en vistas sueltas
             d[i] = d.get(i, 0) + (1 << shift)
+        if self.mf is not None and items.mfV is not None:  # lo de hoy también mueve sus "gustos"
+            self.mf[r] += EVENT_MF.get(etype, 0.0) * items.mfV[i]
 
     # ------------------------------------------------------------------ carga desde RawTree
-    def load(self, query: Callable[..., list[dict]], table: str, cond: str = "", chunks: int = 8) -> None:
-        """Agrega en RawTree (SQL) la actividad por usuario y la suma a la memoria."""
+    def load(self, query: Callable[..., list[dict]], table: str, cond: str = "", chunks: int = 8,
+             mfV: np.ndarray | None = None) -> None:
+        """Agrega en RawTree (SQL) la actividad por usuario y la suma a la memoria.
+        Con mfV (eventos de hoy), además actualiza los factores de "usuarios parecidos"."""
         self.ensure_cols()
         jobs = [(kind, i) for kind in ("sub", "brand", "prod") for i in range(chunks)]
 
@@ -172,6 +214,8 @@ class UserStore:
                             i = PRODUCTS.idx.get(p)
                             if i is not None:
                                 d[i] = d.get(i, 0) + int(v) + (int(a) << 20) + (int(b) << 40)
+                                if mfV is not None and self.mf is not None and i < len(mfV):
+                                    self.mf[r] += math.log1p(int(v) + 3 * int(a) + 5 * int(b)) * mfV[i]
                     else:
                         index, m = (SUBS, self.sub) if kind == "sub" else (BRANDS, self.brand)
                         for name, n in zip(row["k"], row["n"]):
@@ -242,7 +286,7 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
     """Tabla N productos × K señales para una request."""
     n = items.n
     F = np.zeros((n, K), np.float32)
-    F[:, K - N_STATIC:] = items.static
+    F[:, STATIC] = items.static
 
     row = users.row.get(user_id) if users is not None else None
     if row is not None:
@@ -258,9 +302,16 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
         if mine:
             for i, packed in list(mine.items()):
                 if i < n:
-                    F[i, 4] = math.log1p(packed & MASK)
-                    F[i, 5] = math.log1p((packed >> 20) & MASK)
-                    F[i, 6] = math.log1p(packed >> 40)
+                    v, a, b = packed & MASK, (packed >> 20) & MASK, packed >> 40
+                    F[i, 4], F[i, 5], F[i, 6] = math.log1p(v), math.log1p(a), math.log1p(b)
+                    if not b:
+                        F[i, FI["cart_no_buy" if a else "viewed_no_cart"]] = 1.0
+        if users.mf is not None and items.mfV is not None and row < len(users.mf):
+            vec = users.mf[row]
+            if vec.any():
+                aff = items.mfV @ vec
+                F[:, FI["mf"]] = aff
+                F[:, FI["mf_z"]] = (aff - aff.mean()) / (aff.std() + 1e-9)
 
     idx = [PRODUCTS.idx.get(v["product_id"]) for v in recent_views or []]
     idx = [i for i in idx if i is not None and i < n]

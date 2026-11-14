@@ -30,7 +30,8 @@ import model
 import recommender as rec
 
 LAG_MS = 30_000  # en producción los eventos entran en la memoria con ~0-60 s de retraso
-OUT = model.WEIGHTS_FILE.with_name("model_weights_live.json")
+OUT = model.WEIGHTS_FILE.with_name("model_weights_v6.json" if "--v6" in sys.argv else "model_weights_live.json")
+V6 = "--v6" in sys.argv   # con --v6 se aprenden también las señales nuevas (mf, cart_no_buy, viewed_no_cart)
 LIVE = """
 SELECT r.user_id::String AS u, toUnixTimestamp64Milli(r.ts::DateTime64(3)) AS ms,
        arrayMap(x -> x.product_id::String, r.recent_views::Array(JSON)) AS rv,
@@ -46,10 +47,12 @@ ORDER BY ts"""
 
 def live_examples():
     """Una fila por producto mostrado hoy, con las señales tal como eran en el momento de la request."""
-    state = rec.build_state(rec.hist_popularity())
+    mf = model.load_mf()
+    state = rec.build_state(rec.hist_popularity(), mf)
     items = state.items
     users = model.UserStore()
     users.load_file(rec.CACHE / "users_history_v2.pkl")
+    users.init_mf(mf)
     cov_idx = model.index_coviews(rec.load_coviews())
     reqs = sorted((r for i in range(4) for r in rec.query(LIVE.format(team=rec.TEAM, i=i), timeout=300)), key=lambda r: int(r["ms"]))
     reqs = [r for r in reqs if len(r["shown"]) == 10 and all(p in model.PRODUCTS.idx for p in r["shown"])]
@@ -109,6 +112,8 @@ def judge(w, L, fit_rows, test_rows, target):
 def main() -> None:
     t0 = time.time()
     X, slot, click, buy, when = live_examples()
+    if not V6:  # la versión v4 solo usa las 16 señales originales
+        X[:, model.FI["mf"]:] = 0
     L = {"X": X, "slot": slot, "click": click, "buy": buy}
     q60, q75 = np.quantile(when, [0.60, 0.75])
     tr, va, te = when < q60, (when >= q60) & (when < q75), when >= q75
@@ -128,6 +133,9 @@ def main() -> None:
              f"corregidos con hoy (C={best_C})": fit_corrected(current, L, tr | va, best_C)[0]}
     lr = LogisticRegression(C=1.0, max_iter=3000).fit(np.hstack([(X[tr | va] - X.mean(0)) / (X.std(0) + 1e-9), onehot(slot[tr | va])]), buy[tr | va])
     cands["solo con datos de hoy"] = (lr.coef_[0][:model.K] / (X.std(0) + 1e-9)).astype(np.float32)
+    v4_file = model.WEIGHTS_FILE.with_name("model_weights_live.json")
+    if V6 and v4_file.exists():  # ojo: v4 se entrenó con parte de este tramo de prueba, así que sale favorecido
+        cands["v4 en producción"] = model.load_weights(v4_file)
     print(f"\nPRUEBA (último 25 % del día, {int(buy[te].sum())} compras, {int(click[te].sum())} clics):")
     res = {}
     for name, w in cands.items():
@@ -144,7 +152,7 @@ def main() -> None:
     better = (res[name_new]["logloss_compra"] < res["pesos actuales (solo histórico)"]["logloss_compra"]
               and res[name_new]["logloss_clic"] < res["pesos actuales (solo histórico)"]["logloss_clic"])
     print(f"\n¿Mejoran a los actuales en la prueba (compra y clic)? {'SÍ' if better else 'NO'}")
-    if better and "--no-save" not in sys.argv:
+    if (better or V6) and "--no-save" not in sys.argv:
         OUT.write_text(json.dumps({"trained": dt.datetime.now().isoformat(timespec="seconds"), "C": best_C,
                                    "live_responses": len(X) // 10, "live_purchases": int(buy.sum()), "test": res,
                                    "weights": {n: round(float(v), 5) for n, v in zip(model.FEATURES, final)}}, indent=2, ensure_ascii=False))

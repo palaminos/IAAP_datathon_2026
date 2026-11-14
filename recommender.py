@@ -54,7 +54,8 @@ DRY_RUN = "--dry-run" in sys.argv
 # para el mismo comprador). La clave es la etiqueta model_version que muestra `monitor.py conv`.
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
-    "v4-live-weights": 100, # v3 con los pesos corregidos con nuestro feedback en vivo (train_live.py)
+    "v6-similar-users": 50, # v4 + "usuarios parecidos" (train_mf.py) + carrito sin compra / visto sin carrito
+    "v4-live-weights": 50,  # v3 con los pesos corregidos con nuestro feedback en vivo (train_live.py)
     # "v5-cart-first": 0,   # v4 + carritos abandonados arriba del todo: PERDIÓ contra v4 en vivo
     #                         (1,29 % vs 2,26 % de conversión, -38 % de clics, 14-nov). Forzar todos los
     #                         carritos desplaza productos mejores; v4 ya sube los que merecen la pena.
@@ -262,7 +263,7 @@ def fair_new_popularity(pop: dict[str, float], hist_pop: dict[str, float], live_
 
 
 def make_state(product: dict[str, Record], available: set[str], hist_pop: dict[str, float],
-               live_pop: dict[str, float], new_age: dict[str, float] | None = None) -> State:
+               live_pop: dict[str, float], new_age: dict[str, float] | None = None, mf: dict | None = None) -> State:
     """Ordena el catálogo por popularidad: histórico + última hora (que pesa x2: tendencias)."""
     # log1p para que los superventas no lo aplasten todo
     pop = {p: math.log1p(hist_pop.get(p, 0)) + 2 * math.log1p(live_pop.get(p, 0)) for p in product}
@@ -279,7 +280,7 @@ def make_state(product: dict[str, Record], available: set[str], hist_pop: dict[s
         if len(by_sub[info["subcategory"]]) < 30:
             by_sub[info["subcategory"]].append(p)
     s.top_by_cat, s.top_by_subcat = dict(by_cat), dict(by_sub)
-    s.items = Items(product, pop, available)
+    s.items = Items(product, pop, available, mf)
     return s
 
 
@@ -292,7 +293,7 @@ def stock_changes() -> dict[str, str]:
         raise
 
 
-def build_state(hist_pop: dict[str, float]) -> State:
+def build_state(hist_pop: dict[str, float], mf: dict | None = None) -> State:
     try:
         rows = query(CATALOG.format(updates=CATALOG_UPDATES))
     except Exception:  # antes de abrir el stream catalog_updates no tiene columnas
@@ -311,7 +312,7 @@ def build_state(hist_pop: dict[str, float]) -> State:
         new_age = {r["product_id"]: float(r["age_min"]) for r in query(NEW_PRODUCTS)}
     except Exception:
         new_age = {}
-    return make_state(product, available, hist_pop, live, new_age)
+    return make_state(product, available, hist_pop, live, new_age, mf)
 
 
 # --------------------------------------------------------------------------- modelos
@@ -375,7 +376,8 @@ class Background:
 
     def __init__(self, hist_pop: dict[str, float]):
         self.hist_pop = hist_pop
-        self.state = build_state(hist_pop)
+        self.mf = model.load_mf()   # factores de "usuarios parecidos"; None si no está mf_factors.npz
+        self.state = build_state(hist_pop, self.mf)
         self.blocked: set[str] = set()   # agotados según la última comprobación rápida
         self.users = UserStore()
         self.users_ready = False
@@ -408,9 +410,10 @@ class Background:
             self.users.load(query, "shop.history_events")
             self.users.save(path)
         n_hist = len(self.users.row)
+        self.users.init_mf(self.mf)
         try:
             wm = query("SELECT toString(max(ts::DateTime64(3))) AS wm FROM shop.events")[0]["wm"]
-            self.users.load(query, "shop.events", cond=f"AND e.ts::DateTime64(3) <= '{wm}'")
+            self.users.load(query, "shop.events", cond=f"AND e.ts::DateTime64(3) <= '{wm}'", mfV=self.state.items.mfV)
             self.users.watermark = wm
         except Exception as e:
             print(f"eventos en vivo no disponibles todavía: {e}")
@@ -443,7 +446,7 @@ class Background:
             time.sleep(REFRESH_S)
             try:
                 t = time.time()
-                self.state = build_state(self.hist_pop)  # reemplazo atómico de la referencia
+                self.state = build_state(self.hist_pop, self.mf)  # reemplazo atómico de la referencia
                 self.users.ensure_cols()
                 n = self._update_users()
                 print(f"refresco en {time.time() - t:.1f}s: {len(self.state.available)} productos disponibles, "
@@ -464,14 +467,19 @@ class Models:
     coviews_idx: dict
     weights: Any = None        # model_weights.json (histórico)
     weights_live: Any = None   # model_weights_live.json (corregidos con el feedback en vivo)
+    weights_v6: Any = None     # model_weights_v6.json (v6: con las señales nuevas, aprendidos del feedback)
 
 
 def load_models() -> Models:
     coviews = load_coviews()
     live_file = model.WEIGHTS_FILE.with_name("model_weights_live.json")
+    v6_file = model.WEIGHTS_FILE.with_name("model_weights_v6.json")
     m = Models(coviews, model.index_coviews(coviews),
                model.load_weights() if model.WEIGHTS_FILE.exists() else None,
-               model.load_weights(live_file) if live_file.exists() else None)
+               model.load_weights(live_file) if live_file.exists() else None,
+               model.load_weights(v6_file) if v6_file.exists() else None)
+    if any(v.startswith("v6") for v in VARIANTS) and (m.weights_v6 is None or not model.MF_FILE.exists()):
+        print("AVISO: falta model_weights_v6.json o mf_factors.npz; v6 no puede funcionar bien")
     if m.weights is None:
         print("AVISO: falta model_weights.json (ejecuta train.py); se usará v1")
     if m.weights_live is None and any(v.startswith(("v4", "v5")) for v in VARIANTS):
@@ -482,8 +490,12 @@ def load_models() -> Models:
 def respond(req: Record, version: str, s: State, blocked: set[str], users: UserStore, m: Models) -> Record:
     """La respuesta a una request con la variante indicada. Nunca falla: si algo va mal, los más populares."""
     try:
-        if version.startswith(("v2", "v3", "v4", "v5")) and m.weights is not None:
+        if version.startswith(("v2", "v3", "v4", "v5", "v6")) and m.weights is not None:
             w = m.weights_live if version.startswith(("v4", "v5")) and m.weights_live is not None else m.weights
+            if version.startswith("v6"):
+                if m.weights_v6 is None:
+                    raise RuntimeError("faltan los pesos de v6")
+                w = m.weights_v6
             items = recommend_v2(req, s, users, m.coviews_idx, w, blocked,
                                  skip_bought=not version.startswith("v2"), cart_first=version.startswith("v5"))
         else:
