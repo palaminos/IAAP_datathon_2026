@@ -61,9 +61,10 @@ DRY_RUN = "--dry-run" in sys.argv
 # para el mismo comprador). La clave es la etiqueta model_version que muestra `monitor.py conv`.
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
-    "v8-new-products": 30,  # v6 reentrenado con más feedback + señal de producto nuevo (tope 0,4), sin las 2 redundantes
-    "v6-similar-users": 30, # v4 + "usuarios parecidos" (train_mf.py) + carrito sin compra / visto sin carrito
-    "v7-explore": 40,       # sortea 10 entre los 40 mejores de v8 para aprender (solo en práctica: NO para la final)
+    "v9-organic": 30,       # v8 + señal orgánica (GBM entrenado con las vistas de la tienda, train_organic.py)
+    "v6-similar-users": 30, # control: v4 + "usuarios parecidos" + carrito sin compra / visto sin carrito
+    "v7-explore": 40,       # sortea 10 entre los 40 mejores de v9 para aprender (solo en práctica: NO para la final)
+    # "v8-new-products": 0, # v6 reentrenado con más feedback + señal de producto nuevo (tope 0,4). v9 lo incluye
     # "v4-live-weights": 0, # v3 con pesos corregidos con el feedback en vivo. Empató con v6 en vivo (1,76 % vs
     #                         1,77 %) y queda por debajo en la validación temporal (AUC 0,871 vs 0,886)
     # "v5-cart-first": 0,   # v4 + carritos abandonados arriba del todo: PERDIÓ contra v4 en vivo
@@ -75,7 +76,7 @@ VARIANTS: dict[str, int] = {
 }
 
 # Exploración (variantes cuyo nombre acaba en "-explore")
-EXPLORE_BASE = "v8"      # parte de las puntuaciones de esta versión
+EXPLORE_BASE = "v9"      # parte de las puntuaciones de esta versión
 EXPLORE_TOP = 40         # candidatos entre los que se sortea
 EXPLORE_T = 1.0          # temperatura: 1 = cada candidato sale en proporción a su probabilidad estimada de compra
 EXPLORE_DRAWS = 300      # sorteos extra para estimar la probabilidad de cada producto en cada puesto
@@ -365,6 +366,8 @@ def recommend_v2(req: Record, s: State, users: UserStore, coviews_idx: dict[int,
     skip_bought (v3): descarta lo que el usuario ya compró. En el feedback real del 14-nov, un producto
     ya comprado se volvió a comprar 8 veces menos que el resto (analysis/live_lift.py)."""
     F = model.featurize(req.get("user_id") or "", req.get("recent_views"), s.items, users, coviews_idx)
+    if weights[model.FI["organic"]] != 0:   # solo las versiones que usan la señal orgánica pagan sus ~6 ms
+        model.add_organic(F)
     score = F @ weights
     if cart_first:
         # v5 (sobre los pesos de v4): lo que dejó en el carrito sin comprar va primero (ordenado entre sí por su puntuación). En el
@@ -387,6 +390,8 @@ def recommend_explore(req: Record, s: State, users: UserStore, coviews_idx: dict
     registro con las probabilidades, para corregir ese sesgo al reentrenar. Las reglas duras no cambian:
     nada ya comprado, nada agotado."""
     F = model.featurize(req.get("user_id") or "", req.get("recent_views"), s.items, users, coviews_idx)
+    if weights[model.FI["organic"]] != 0:
+        model.add_organic(F)
     score = (F @ weights).astype(np.float64)
     score[F[:, model.FI["p_buy"]] > 0] = -np.inf
     score[~s.items.avail] = -np.inf
@@ -618,6 +623,9 @@ def preflight() -> int:
     s, blocked = bg.state, {p for p, last in stock_changes().items() if last == "out_of_stock"}
     reqs = query(NEW_REQUESTS, timeout=10)
     ok = len(reqs) > 0 and len(s.available) >= 10
+    if any(w[model.FI["organic"]] != 0 for w in m.by_version.values()) and model.load_organic() is None:
+        print("  FALTA organic_gbm.pkl (o scikit-learn): hay versiones que usan la señal orgánica")
+        ok = False
     for version in VARIANTS:
         t = time.time()
         out = [respond(r, version, s, blocked, bg.users, m) for r in reqs]

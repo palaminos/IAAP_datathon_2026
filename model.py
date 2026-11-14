@@ -44,6 +44,8 @@ FEATURES = [
     "viewed_no_cart",  # 1 si lo ha visto pero nunca lo metió en el carrito ni lo compró
     # --- añadida en v8 ---
     "is_new_prod",     # 1 si el producto se lanzó durante el evento (new_product en shop.catalog_updates)
+    # --- añadida en v9 ---
+    "organic",         # salida de un GBM entrenado con la actividad orgánica de la tienda (train_organic.py)
 ]
 K = len(FEATURES)
 FI = {name: i for i, name in enumerate(FEATURES)}
@@ -51,6 +53,32 @@ STATIC = slice(FI["pop_sub"], FI["pop_sub"] + 3)  # columnas que no dependen de 
 WEIGHTS_FILE = Path(__file__).with_name("model_weights.json")
 MF_FILE = Path(__file__).with_name("mf_factors.npz")
 EVENT_MF = {"view": math.log1p(1), "add_to_cart": math.log1p(3), "purchase": math.log1p(5)}
+
+
+ORGANIC_FILE = Path(__file__).with_name("organic_gbm.pkl")
+_ORGANIC: list = [False, None]   # [ya se intentó cargar, (modelo, columnas) o None]
+
+
+def load_organic(path: Path = ORGANIC_FILE):
+    """El GBM de la señal orgánica y las columnas que usa. None si no hay fichero o no se puede cargar."""
+    if not _ORGANIC[0]:
+        _ORGANIC[0] = True
+        try:
+            with path.open("rb") as f:
+                d = pickle.load(f)
+            _ORGANIC[1] = (d["model"], [FI[n] for n in d["features"]])
+        except Exception as e:
+            print(f"señal orgánica no disponible ({e!r}): valdrá 0")
+    return _ORGANIC[1]
+
+
+def add_organic(F: np.ndarray) -> np.ndarray:
+    """Rellena la señal 'organic' de las filas de F (productos × señales) con la salida del GBM orgánico."""
+    loaded = load_organic()
+    if loaded is not None and len(F):
+        gbm, cols = loaded
+        F[:, FI["organic"]] = gbm.decision_function(F[:, cols])
+    return F
 
 
 def load_mf(path: Path = MF_FILE) -> dict | None:

@@ -91,7 +91,7 @@ def live_examples():
             events, e = rec.query(EVENTS.format(a=hour, b=hour + dt.timedelta(hours=1)), timeout=300), 0
             hour += dt.timedelta(hours=1)
         idx = [model.PRODUCTS.idx[p] for p in r["shown"]]
-        X.append(model.featurize(r["u"], [{"product_id": p} for p in r["rv"]], items, users, cov_idx)[idx])
+        X.append(model.add_organic(model.featurize(r["u"], [{"product_id": p} for p in r["rv"]], items, users, cov_idx)[idx]))
         slot.append(np.arange(10)), when.append(np.full(10, int(r["ms"])))
         explored.append(np.full(10, r.get("rid") in explore_ids))
         click.append([p == r["clicked"] for p in r["shown"]]), buy.append([p == r["purchased"] for p in r["shown"]])

@@ -40,11 +40,11 @@ class Basics(unittest.TestCase):
             users.add_event("u1", "p010", "view", STATE.items)
         users.add_event("u1", "p011", "add_to_cart", STATE.items)
         users.add_event("u1", "p012", "purchase", STATE.items)
-        m = rec.Models({}, {}, WEIGHTS, WEIGHTS, {"v6": WEIGHTS, "v8": WEIGHTS})
+        m = rec.Models({}, {}, WEIGHTS, WEIGHTS, {"v6": WEIGHTS, "v8": WEIGHTS, "v9": WEIGHTS})
         reqs = [{"request_id": "r1", "user_id": "u1", "recent_views": [{"product_id": "p010"}]},
                 {"request_id": "r2", "user_id": "desconocido", "recent_views": []},
                 {"request_id": "r3", "user_id": "u1", "recent_views": [{"product_id": "no-existe"}]}]
-        for version in ("v1-coview-trend", "v2-user-lr", "v3-no-rebuy", "v4-live-weights", "v5-cart-first", "v6-similar-users", "v8-new-products"):
+        for version in ("v1-coview-trend", "v2-user-lr", "v3-no-rebuy", "v4-live-weights", "v5-cart-first", "v6-similar-users", "v8-new-products", "v9-organic"):
             for req in reqs:
                 out = rec.respond(req, version, STATE, {"p020"}, users, m)
                 self.assertTrue(is_valid(out["items"], {"p020"}), (version, req["request_id"], out))

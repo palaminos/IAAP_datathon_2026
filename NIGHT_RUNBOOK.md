@@ -8,15 +8,15 @@ Carpetas: trabajo en `~/Desktop/Q5/Datathon/rawtree` (rama `tarre`); producción
 `~/Desktop/Q5/Datathon/rawtree-prod` (no se edita). Python: `/Applications/anaconda3/bin/python3`.
 Informe acumulado: `logs/night_report.md`.
 
-## Plan de la noche (actualizado el sábado a las 18:55)
+## Plan de la noche (actualizado el sábado a las 19:05)
 
 Reparto previsto, pendiente de que tarre lo apruebe y lo despliegue tras ver la prueba previa:
 
 | Variante | % | Para qué |
 |---|---|---|
-| `v8-new-products` | 30 | La receta candidata para la final: v6 reentrenado con más feedback + señal de producto nuevo (con tope) |
+| `v9-organic` | 30 | La receta candidata para la final: reentrenado con todo el feedback + señal de producto nuevo (con tope) + señal orgánica (GBM entrenado con las vistas de la tienda) |
 | `v6-similar-users` | 30 | Control: lo que corría hasta ahora |
-| `v7-explore` | 40 | Sortea 10 entre los 40 mejores de v8 y guarda en `team_23.scratch` (`feature_set = 'explore_v1'`) las probabilidades. Convierte menos a propósito: sirve para aprender qué pasa con lo que el modelo no suele enseñar. **No es para la final** |
+| `v7-explore` | 40 | Sortea 10 entre los 40 mejores de v9 y guarda en `team_23.scratch` (`feature_set = 'explore_v1'`) las probabilidades. Convierte menos a propósito: sirve para aprender qué pasa con lo que el modelo no suele enseñar. **No es para la final** |
 
 **El bucle NO cambia el modelo ni el reparto esta noche.** Queda anulado el "único cambio permitido" de
 la versión anterior de este documento.
@@ -55,7 +55,7 @@ y compras ha reunido cada variante, la conversión de v6 y la de la exploración
 los pasos de la mañana:
 
 1. Reentrenar con todo el feedback (incluye la exploración):
-   `nice -n 15 /Applications/anaconda3/bin/python3 train_live.py --out v8 --drop cart_no_buy,viewed_no_cart`
+   `nice -n 15 /Applications/anaconda3/bin/python3 train_live.py --out v10 --drop cart_no_buy,viewed_no_cart --cap is_new_prod=0.4`
    y mirar la tabla de PRUEBA, incluida la fila "solo exploración".
 2. Dejar en `VARIANTS` solo la versión elegida al 100 % (**sin** `v7-explore`), pasar tests y prueba previa.
 3. Desplegar con `./deploy.sh` antes de las 9:30 y no tocar nada más hasta las 12:00.
