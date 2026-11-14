@@ -36,7 +36,17 @@ else
 fi
 NEW=$(git rev-parse --verify -q "$REF^{commit}") || fail "No existe la versión '$REF'."
 OLD=$(git rev-parse HEAD)
-[ "$NEW" = "$OLD" ] && { echo "Ya está desplegada: $(git log --oneline -1)"; exit 0; }
+if [ "$NEW" = "$OLD" ]; then
+    echo "El código ya está en esa versión: $(git log --oneline -1)"
+    if pgrep -f "python3 -u .*recommender" >/dev/null; then
+        echo "✓ Y el recomendador está corriendo."
+    else
+        echo "✗ PERO NO HAY NINGÚN RECOMENDADOR CORRIENDO: producción está PARADA."
+        echo "  Lánzalo ya en la terminal de producción:  ./run_forever.sh"
+        exit 1
+    fi
+    exit 0
+fi
 echo "Actual:    $(git log --oneline -1 "$OLD")"
 echo "Candidata: $(git log --oneline -1 "$NEW")"
 
