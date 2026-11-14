@@ -1,0 +1,69 @@
+{
+  "trained": "2026-11-14T21:26:35",
+  "target": "compras",
+  "train_window": [
+    "2026-11-01",
+    "2026-11-15"
+  ],
+  "offline_eval_test_week": {
+    "más vendidos (baseline)": {
+      "compras": 3087,
+      "hit@10 %": 52.80207321023648,
+      "MRR entre mostrados": 0.599487482067657,
+      "hit@10 home %": 58.108108108108105,
+      "hit@10 resto %": 52.67175572519084
+    },
+    "v1 (reglas)": {
+      "compras": 3087,
+      "hit@10 %": 57.207644962747004,
+      "MRR entre mostrados": NaN,
+      "hit@10 home %": 58.108108108108105,
+      "hit@10 resto %": 57.18552937271822
+    },
+    "v2 entrenado con compras": {
+      "compras": 3087,
+      "hit@10 %": 67.86524133462909,
+      "MRR entre mostrados": 0.6690477475948807,
+      "hit@10 home %": 64.86486486486487,
+      "hit@10 resto %": 67.93893129770993
+    },
+    "v2 entrenado con clics": {
+      "compras": 3087,
+      "hit@10 %": 67.18496922578555,
+      "MRR entre mostrados": 0.6705990559489101,
+      "hit@10 home %": 66.21621621621621,
+      "hit@10 resto %": 67.20876203119815
+    }
+  },
+  "weights": {
+    "sub_share": 5.76593,
+    "sub_log": -0.53754,
+    "cat_share": 1.92802,
+    "brand_share": -2.94291,
+    "p_view": -0.47461,
+    "p_cart": 1.32177,
+    "p_buy": 0.0,
+    "in_session": 0.92773,
+    "is_last": 0.67947,
+    "same_sub": 0.1695,
+    "same_cat": 0.31649,
+    "sess_sub_share": 0.63299,
+    "coview": -0.35787,
+    "pop_sub": 1.7078,
+    "pop_glob": 4.3011,
+    "log_price": 0.00164,
+    "mf": 0.0,
+    "mf_z": 0.0,
+    "cart_no_buy": 0.59817,
+    "viewed_no_cart": -2.71688,
+    "is_new_prod": 0.0,
+    "organic": 0.0,
+    "on_sale": 0.0,
+    "cf": 1.02955,
+    "cf_any": 0.20566,
+    "cf_sess": 0.6987,
+    "cf_sess_any": -0.13968,
+    "cf_view": -0.3953
+  },
+  "note": "Entrenado con el histórico SIN las impresiones de productos ya comprados (--no-rebuy) y con las señales de parecido (--cf, tabla anterior al 1-nov). p_buy puesto a 0: sin recompras no se puede aprender."
+}

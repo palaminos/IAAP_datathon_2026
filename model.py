@@ -66,7 +66,7 @@ EVENT_MF = {"view": math.log1p(1), "add_to_cart": math.log1p(3), "purchase": mat
 
 CTX_FILE = Path(__file__).with_name("ctx_tables.json")
 CF_FILE = Path(__file__).with_name("cf_sim.npz")
-_CF: dict = {"n": 0, "S": None}   # matriz de similitud ya traducida a los números de este proceso
+_CF: dict = {}   # nombre de tabla -> {"n", "S"}: matriz de similitud ya traducida a los números de este proceso
 
 
 def load_cf(path: Path = CF_FILE) -> dict | None:
@@ -77,16 +77,50 @@ def load_cf(path: Path = CF_FILE) -> dict | None:
     return {"products": d["products"].tolist(), "i": d["i"], "j": d["j"], "v": d["v"], "scale": float(d["scale"])}
 
 
-def cf_matrix(cf: dict, n: int):
+def cf_matrix(cf: dict, n: int, name: str = ""):
     """Matriz dispersa n x n (fila = producto que le gustó, columna = candidato). Solo se rehace si el
     catálogo ha crecido: los números de los productos ya conocidos no cambian nunca."""
-    if _CF["S"] is None or _CF["n"] != n:
+    c = _CF.get(name)
+    if c is None or c["n"] != n or c["src"] is not cf:
         from scipy.sparse import csr_matrix
         lookup = np.array([PRODUCTS.idx.get(p, -1) for p in cf["products"]], np.int64)
         i, j = lookup[cf["i"]], lookup[cf["j"]]
         ok = (i >= 0) & (j >= 0)
-        _CF["S"], _CF["n"] = csr_matrix((cf["v"][ok], (i[ok], j[ok])), shape=(n, n)), n
-    return _CF["S"]
+        c = _CF[name] = {"S": csr_matrix((cf["v"][ok], (i[ok], j[ok])), shape=(n, n)), "n": n, "src": cf}
+    return c["S"]
+
+
+def cf_tables() -> dict[str, dict]:
+    """Todas las tablas de parecidos que necesita producción: la de siempre ("" -> cf_sim.npz) y las que pidan
+    las versiones en sus opciones ("cf_file": "cf_ease.npz" en model_weights_<versión>.json)."""
+    tables: dict[str, dict] = {}
+    base = load_cf()
+    if base is not None:
+        tables[""] = base
+    for f in sorted(WEIGHTS_FILE.parent.glob("model_weights_v*.json")):
+        name = load_options(f).get("cf_file") or ""
+        if name and name not in tables:
+            t = load_cf(WEIGHTS_FILE.with_name(name))
+            if t is None:
+                print(f"AVISO: falta {name} (lo pide {f.name}); esa versión usará la tabla de parecidos de siempre")
+            else:
+                tables[name] = t
+    return tables
+
+
+class CFTable:
+    """Una tabla de parecidos alineada con el catálogo actual, con lo necesario para rellenar los productos nuevos."""
+
+    def __init__(self, cf: dict, items: "Items", name: str):
+        self.S = cf_matrix(cf, items.n, name)
+        self.scale = cf["scale"]
+        self.new = None   # productos nuevos sin ningún parecido calculado (se lanzaron después de hacer la tabla)
+        new = (items.is_new > 0) & (self.S.getnnz(axis=0) == 0)
+        if new.any() and not new.all():
+            self.new = np.flatnonzero(new)
+            self.old = ~new
+            self.old_sub = items.sub[~new]
+            self.sub_n = np.maximum(np.bincount(self.old_sub, minlength=items.nsub), 1).astype(np.float64)
 ORGANIC_FILE = Path(__file__).with_name("organic_gbm.pkl")
 _ORGANIC: list = [False, None]   # [ya se intentó cargar, (modelo, columnas) o None]
 
@@ -189,16 +223,9 @@ class Items:
             rank_sub[i] = seen_in_sub[self.sub[i]]
         self.static = np.stack([1 / np.sqrt(rank_sub), 1 - rank_glob / n, np.log(price)], axis=1).astype(np.float32)
         self.pop = pop
-        self.cf = cf_matrix(cf, n) if cf is not None else None
-        self.cf_scale = cf["scale"] if cf is not None else 1.0
-        self.cf_new = None   # productos nuevos sin ningún parecido calculado (se lanzaron después del histórico)
-        if self.cf is not None:
-            new = (self.is_new > 0) & (self.cf.getnnz(axis=0) == 0)
-            if new.any() and not new.all():
-                self.cf_new = np.flatnonzero(new)
-                self.cf_old_sub = self.sub[~new]
-                self.cf_old = ~new
-                self.cf_sub_n = np.maximum(np.bincount(self.cf_old_sub, minlength=self.nsub), 1).astype(np.float64)
+        # Tablas de parecidos: `cf` es una sola (la de siempre) o un diccionario nombre -> tabla (ver cf_tables)
+        tables = {} if cf is None else ({"": cf} if "products" in cf else cf)
+        self.cfs = {name: CFTable(t, self, name) for name, t in tables.items()}
         # Factores de cada producto para la señal de "usuarios parecidos" (ceros si es nuevo: aún no los tiene)
         self.mfV = None
         if mf is not None:
@@ -211,16 +238,16 @@ class Items:
             self.mf_sub_n = np.bincount(self.sub[self.mf_known], minlength=self.nsub).astype(np.float64)
 
 
-def cf_sum(items: Items, rows: list[int], fill: bool) -> np.ndarray:
+def cf_sum(items: Items, t: CFTable, rows: list[int], fill: bool) -> np.ndarray:
     """Suma, para cada producto, de su parecido con los productos `rows`.
 
     Con fill=True, a un producto nuevo (sin parecidos calculados: no existía en el histórico) se le supone
     el parecido medio de los productos de su subcategoría, igual que se hace con mf. Sin esto vale 0 y el
     modelo lo entierra o hay que compensarlo a ciegas con is_new_prod."""
-    sim = np.asarray(items.cf[rows].sum(0)).ravel()
-    if fill and items.cf_new is not None:
-        sub_sum = np.bincount(items.cf_old_sub, weights=sim[items.cf_old], minlength=items.nsub)
-        sim[items.cf_new] = (sub_sum / items.cf_sub_n)[items.sub[items.cf_new]]
+    sim = np.asarray(t.S[rows].sum(0)).ravel()
+    if fill and t.new is not None:
+        sub_sum = np.bincount(t.old_sub, weights=sim[t.old], minlength=items.nsub)
+        sim[t.new] = (sub_sum / t.sub_n)[items.sub[t.new]]
     return sim
 
 
@@ -374,8 +401,10 @@ SELECT u, groupArray(p) AS p, groupArray(v) AS v, groupArray(a) AS a, groupArray
 
 
 def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users: UserStore | None,
-              coviews: dict[int, list[int]], cf_fill: bool = False) -> np.ndarray:
-    """Tabla N productos × K señales para una request. cf_fill: ver cf_sum (lo usan las versiones v14+)."""
+              coviews: dict[int, list[int]], cf_fill: bool = False, cf_table: str = "") -> np.ndarray:
+    """Tabla N productos × K señales para una request. cf_fill: ver cf_sum (lo usan las versiones v14+).
+    cf_table: qué tabla de parecidos usar ("" = cf_sim.npz; las versiones v17+ traen la suya)."""
+    t = items.cfs.get(cf_table) or items.cfs.get("")
     n = items.n
     F = np.zeros((n, K), np.float32)
     F[:, STATIC] = items.static
@@ -400,15 +429,15 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
                     F[i, 4], F[i, 5], F[i, 6] = math.log1p(v), math.log1p(a), math.log1p(b)
                     if not b:
                         F[i, FI["cart_no_buy" if a else "viewed_no_cart"]] = 1.0
-            if items.cf is not None:
+            if t is not None:
                 liked = [i for i, packed in list(mine.items()) if i < n and ((packed >> 20) & MASK or packed >> 40)]
                 if liked:   # suma de parecidos con todo lo que metió en el carrito o compró
-                    sim = cf_sum(items, liked, cf_fill)
-                    F[:, FI["cf"]] = np.log1p(items.cf_scale * sim)
+                    sim = cf_sum(items, t, liked, cf_fill)
+                    F[:, FI["cf"]] = np.log1p(t.scale * sim)
                     F[:, FI["cf_any"]] = sim > 0
                 seen_only = [i for i, packed in list(mine.items()) if i < n and not ((packed >> 20) & MASK or packed >> 40)]
                 if seen_only:
-                    F[:, FI["cf_view"]] = np.log1p(items.cf_scale * cf_sum(items, seen_only, cf_fill))
+                    F[:, FI["cf_view"]] = np.log1p(t.scale * cf_sum(items, t, seen_only, cf_fill))
         if users.mf is not None and items.mfV is not None and row < len(users.mf):
             vec = users.mf[row]
             known = items.mf_known
@@ -434,9 +463,9 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
         F[:, 9] = items.sub == items.sub[last]
         F[:, 10] = items.cat == items.cat[last]
         F[:, 11] = np.bincount(items.sub[idx], minlength=items.nsub)[items.sub] / len(idx)
-        if items.cf is not None:
-            sim = cf_sum(items, sorted(set(idx)), cf_fill)
-            F[:, FI["cf_sess"]] = np.log1p(items.cf_scale * sim)
+        if t is not None:
+            sim = cf_sum(items, t, sorted(set(idx)), cf_fill)
+            F[:, FI["cf_sess"]] = np.log1p(t.scale * sim)
             F[:, FI["cf_sess_any"]] = sim > 0
         for k, p in enumerate(reversed(idx[-10:])):  # la vista más reciente pesa más
             decay = 0.7 ** k

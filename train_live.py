@@ -183,9 +183,10 @@ def main() -> None:
     t0 = time.time()
     if "--matrix" in sys.argv:   # usa la tabla guardada por analysis/live_matrix.py (segundos en vez de minutos)
         global EXPLORED_ROWS
-        d = np.load(rec.CACHE / "live_matrix.npz")
+        d = np.load(rec.CACHE / (_arg("--matrix-file") or "live_matrix.npz"))
         assert list(d["features"]) == model.FEATURES, "la tabla guardada tiene otras señales: repite analysis/live_matrix.py"
         assert bool(d["cf_fill"]) == CF_FILL, "la tabla guardada se hizo con otro valor de --cf-fill"
+        assert (str(d["cf_file"]) if "cf_file" in d.files else "") == (Path(_arg("--cf-file")).name if _arg("--cf-file") else ""), "la tabla guardada se hizo con otra tabla de parecidos (--cf-file)"
         X, slot, click, buy, when, EXPLORED_ROWS = d["X"].copy(), d["slot"], d["click"], d["buy"], d["when"], d["explored"]
         is_new = d["new"].astype(bool)
     else:
@@ -205,6 +206,7 @@ def main() -> None:
           f"probar {int(buy[te].sum())} | clics en prueba: {int(click[te].sum())} ({time.time() - t0:.0f}s)")
     # --base hist13 : parte de model_weights_hist13.json en vez de model_weights.json
     current = model.load_weights(model.WEIGHTS_FILE.with_name(f"model_weights_{_arg('--base')}.json")) if _arg("--base") else model.load_weights()
+    current[DROP] = 0   # una señal que se deja fuera no debe colarse en producción a través de los pesos de partida
     # 1) elegir la fuerza de la regularización con la parte de validación
     fit_w = fit_plain if "--no-base" in sys.argv else fit_corrected
     best_C, best = None, 9.0
@@ -262,7 +264,7 @@ def main() -> None:
     print(f"\n¿Mejoran a los actuales en la prueba (compra y clic)? {'SÍ' if better else 'NO'}")
     if (better or V6) and "--no-save" not in sys.argv:
         OUT.write_text(json.dumps({"trained": dt.datetime.now().isoformat(timespec="seconds"), "C": best_C, "caps": CAPS,
-                                   "options": {"cf_fill": CF_FILL}, "segment": SEGMENT or "all", "base": "ninguna" if "--no-base" in sys.argv else (_arg("--base") or "histórico"),
+                                   "options": {"cf_fill": CF_FILL, "cf_file": Path(_arg("--cf-file")).name if _arg("--cf-file") else ""}, "segment": SEGMENT or "all", "base": "ninguna" if "--no-base" in sys.argv else (_arg("--base") or "histórico"),
                                    "live_responses": len(X) // 10, "live_purchases": int(buy.sum()), "test": res,
                                    "weights": {n: round(float(v), 5) for n, v in zip(model.FEATURES, final)}}, indent=2, ensure_ascii=False))
         print(f"guardado {OUT.name}")

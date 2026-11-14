@@ -1,4 +1,4 @@
-# Guardia nocturna v4 · sábado 14 → domingo 15 de noviembre
+# Guardia nocturna v5 · sábado 14 → domingo 15 de noviembre
 
 Mandato de tarre (sábado 20:15): *"Quiero que sigas probando modelos durante la noche. Te doy libertad a
 tocar todos los modelos siempre y cuando dejes constancia de lo que estás tocando. Y me hagas un resumen
@@ -53,24 +53,62 @@ Diario: `logs/night_report.md`. Estado: `logs/night_state.json` (campeona, retad
 4. Avanzar la cola de ideas si hay hueco y no son más de las 08:30.
 5. Responder en dos o tres líneas: salud, cómo van las variantes y qué se ha hecho.
 
-## Rondas
+## Estado de la noche (actualizar al cambiar algo)
 
-| Ronda | Horario | Reparto | Estado |
-|---|---|---|---|
-| 1 | 20:40 → ~00:00 | v6 32 % (campeona) · v8 17 % · v12-cf 17 % · v10-sale 17 % · v9-organic 17 % | En marcha (commit c60d19f) |
-| 2 | ~00:00 → ~04:00 | ganadora de la ronda 1 + nuevas candidatas (ver cola) | Pendiente |
-| 3 | ~04:00 → 08:30 | las 2-3 finalistas con mucho tráfico cada una, para decidir con margen pequeño | Pendiente |
+| Tramo | Reparto | Commit |
+|---|---|---|
+| 20:05-20:35 | v6 60 · v8 20 · v10 20 | 35ffd24 |
+| 20:35-21:05 | v6 32 · v8 17 · v12 17 · v10 17 · v9 17 (sin internet de 20:46 a 20:56) | c60d19f |
+| 21:05-21:20 | v8 32 (campeona, decisión de tarre) · v12 19 · v13 19 · v9 18 · v6 12; bucle con hilos | fce3bb0 |
+| 21:20- | v8 28 · v12 20 · v13 20 · v14 20 · v6 12 | 86b9f96 |
+
+Qué es cada versión:
+- **v6**: v4 + "usuarios parecidos". Campeona hasta las 21:05; ahora control.
+- **v8** (campeona): v6 reentrenado con más feedback + señal de producto nuevo. Empatada con v6 (z = -0,4).
+- **v12-cf**: v8 + parecido entre productos por carritos y compras ("quien compró X también Y") con lo que el comprador metió en el carrito o compró. Primera hora: +0,25 a +0,47 sobre v8 (z entre +1,5 y +2,9).
+- **v13-cf-session**: v12 + parecido con lo visto en la sesión y con lo visto otros días.
+- **v14-cf-split**: v13 + pesos distintos para compradores nuevos y conocidos + parecido estimado para productos nuevos.
+- Retiradas con datos: v9 (dos veces z ≈ -2), v10 (sin base), v5, v4, v7.
+
+Las decisiones se leen con `python monitor.py ab` (usa `periods` y `champion` de `logs/night_state.json`).
+**Tras cada despliegue hay que añadir a `periods` la hora de inicio del tramo nuevo** (redondeada a 5 minutos
+hacia arriba) y, si cambia la campeona, `champion`.
+
+## Receta para reentrenar una versión (≈ 10 minutos, de uno en uno)
+
+```bash
+cd ~/Desktop/Q5/Datathon/rawtree; PY=/Applications/anaconda3/bin/python3; D=cart_no_buy,viewed_no_cart,organic,on_sale
+OMP_NUM_THREADS=1 nice -n 19 $PY -u analysis/live_matrix.py --cf-fill          # reproduce el día: tabla de señales (4-6 min)
+OMP_NUM_THREADS=1 nice -n 19 $PY -u train_live.py --matrix --cf-fill --segment known --out vNN --drop $D --cap is_new_prod=1.0
+OMP_NUM_THREADS=1 nice -n 19 $PY -u train_live.py --matrix --cf-fill --segment new --no-base --out vNNn --drop $D --cap is_new_prod=1.0
+$PY analysis/calibrate_new.py vNN                  # productos nuevos: misma exposición que v8 (~6 % de los huecos)
+$PY analysis/compare_lists.py v8 v12 vNN           # ¿enseña algo raro? (nuevos, popularidad, ms por request)
+# después: VARIANTS en recommender.py, tests, --preflight, commit, push, git ls-remote, ./deploy.sh, night_state.json, diario
+```
+
+Lo aprendido esta noche sobre las pruebas offline: con ~150-200 compras de prueba no distinguen modelos
+parecidos (árboles, logit condicional, tabla de parecidos con datos de hoy: todo dentro del ruido). Sirven
+para detectar disparates, no para elegir. **Elige el leaderboard.**
+
+Otros datos útiles:
+- El leaderboard trae un campo `progress` por equipo y hora = 100 × (conversión − baseline) / (óptimo − baseline):
+  qué parte de la mejora máxima posible captura cada equipo. El líder ronda el 60 %, la referencia el 53 % y
+  nosotros el 38-41 % cuando no hay paradas. Solo depende de la conversión total (las respuestas perdidas
+  cuentan como baseline). Cold start y fiabilidad se puntúan aparte.
+- Rebajas: empiezan a las 10:30, 13:30, 16:30, 19:30... UTC y duran 2 h. La señal "rebajado" no aporta (peso
+  aprendido -0,15).
+- Productos nuevos: 100 a las 10:00, 14:00 y 18:00 UTC del sábado (¿cada 4 h?). Si sigue así, entran 100 a las
+  11:00 hora local del domingo, en plena final. En los eventos orgánicos se venden como los antiguos.
 
 ## Cola de ideas (en este orden)
 
 | # | Idea | Estado |
 |---|---|---|
-| A | `v12-cf`: parecido entre productos por carritos y compras ("quien compró X también Y") aplicado a lo que el comprador ya metió en el carrito o compró. En el histórico, sin ese parecido casi no hay compras | En la ronda 1 |
-| B | `v13`: el mismo parecido aplicado a lo que el comprador acaba de VER en la sesión y a lo que vio otros días. Es lo único que sabemos de un comprador nuevo; en el histórico multiplica la compra hasta por 30 | Construyéndose (señales `cf_sess`, `cf_view`) |
-| C | Rebajas (`v10-sale`): solo se juzga dentro de las ventanas (20:30-22:30, 23:30-01:30, 02:30-04:30, 05:30-07:30, 08:30-10:30 y probablemente 11:30-13:30) | En la ronda 1 |
-| D | Productos nuevos: v8 los enseña en el 5,5 % de los huecos. Probar más exposición (el peso aprendido pide mucha más) | Pendiente, ronda 2 |
-| E | Latencia: quitar 0,2 s de espera del bucle (`POLL_S` 0,3 → 0,1) y enviar las respuestas en un hilo aparte | Con el siguiente despliegue |
-| F | Reentrenar la finalista con el feedback de toda la noche y validarla como retadora en la ronda 3 | Pendiente |
+| A | v12, v13, v14 frente a v8 | En marcha. Promocionar con z ≥ +2 y 3.000 requests; retirar con z ≤ -2 |
+| B | `v15`: base del histórico reentrenada SIN recompras y con las señales de parecido (`train.py --cf --no-rebuy --out hist15`), corregida con el feedback de hoy (`train_live.py --base hist15`) para compradores conocidos. Es donde la referencia nos gana (2,1 % frente a 1,5 %) | Entrenándose |
+| C | Tabla de parecidos con los carritos y compras de hoy (`train_cf.py --live-until ...`): da parecidos reales a los productos nuevos. Offline no se distingue de la actual. Requiere una tabla por versión en producción | Pendiente; solo si sobra tiempo |
+| D | Reentrenar la mejor versión con el feedback de la noche (hacia la 01:00 y hacia las 05:00): ya habrá miles de respuestas de v12-v14, que enseñan productos elegidos por parecido | Pendiente |
+| E | Ronda final (desde ~05:00): las 2 mejores con mucho tráfico cada una | Pendiente |
 
 ## Último despertar antes de la final (08:30-09:15)
 

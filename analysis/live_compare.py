@@ -23,13 +23,15 @@ import recommender as rec  # noqa: E402
 files = [a for a in sys.argv[1:] if a.endswith(".npz")]
 after = sys.argv[sys.argv.index("--after") + 1] if "--after" in sys.argv else "2026-11-14 00:00:00"
 cut_ms = dt.datetime.fromisoformat(after).replace(tzinfo=dt.timezone.utc).timestamp() * 1000
+before = sys.argv[sys.argv.index("--before") + 1] if "--before" in sys.argv else "2099-01-01 00:00:00"
+end_ms = dt.datetime.fromisoformat(before).replace(tzinfo=dt.timezone.utc).timestamp() * 1000
 DROP = ["cart_no_buy", "viewed_no_cart", "organic", "on_sale"]
 onehot = lambda s: np.eye(10)[s][:, 1:]
 
 
 def evaluate(path):
     d = np.load(rec.CACHE / path)
-    keep = d["when"] >= cut_ms
+    keep = (d["when"] >= cut_ms) & (d["when"] < end_ms)
     X, slot, buy, when, new = d["X"][keep].astype(np.float64), d["slot"][keep], d["buy"][keep], d["when"][keep], d["new"][keep].astype(bool)
     cols = [i for i, n in enumerate(d["features"]) if n not in DROP]
     q = np.quantile(when, 0.70)
@@ -53,7 +55,7 @@ def evaluate(path):
     return out, len(X) // 10
 
 
-print(f"respuestas posteriores a {after} UTC; entrenar 70 % / probar 30 %\n")
+print(f"respuestas entre {after} y {before} UTC; entrenar 70 % / probar 30 %\n")
 print(f"{'tabla':<28}{'respuestas':>11} | {'NUEVOS: AUC':>12}{'log-loss':>10}{'puesto':>8}{'compras':>10} | {'CONOCIDOS: AUC':>15}{'log-loss':>10}{'puesto':>8}{'compras':>10}")
 for f in files:
     r, n = evaluate(f)

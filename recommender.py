@@ -379,12 +379,12 @@ def recommend_v1(req: Record, s: State, coviews: dict[str, list[str]], w: dict =
 
 def recommend_v2(req: Record, s: State, users: UserStore, coviews_idx: dict[int, list[int]], weights,
                  blocked: set[str] = frozenset(), skip_bought: bool = False, cart_first: bool = False,
-                 cf_fill: bool = False) -> list[str]:
+                 cf_fill: bool = False, cf_table: str = "") -> list[str]:
     """v2: puntúa todos los productos (señales × pesos aprendidos) y se queda con los 10 mejores.
 
     skip_bought (v3): descarta lo que el usuario ya compró. En el feedback real del 14-nov, un producto
     ya comprado se volvió a comprar 8 veces menos que el resto (analysis/live_lift.py)."""
-    F = model.featurize(req.get("user_id") or "", req.get("recent_views"), s.items, users, coviews_idx, cf_fill)
+    F = model.featurize(req.get("user_id") or "", req.get("recent_views"), s.items, users, coviews_idx, cf_fill, cf_table)
     if weights[model.FI["organic"]] != 0:   # solo las versiones que usan la señal orgánica pagan sus ~6 ms
         model.add_organic(F)
     score = F @ weights
@@ -463,7 +463,7 @@ class Background:
     def __init__(self, hist_pop: dict[str, float]):
         self.hist_pop = hist_pop
         self.mf = model.load_mf()   # factores de "usuarios parecidos"; None si no está mf_factors.npz
-        self.cf = model.load_cf()   # similitud producto-producto; None si no está cf_sim.npz
+        self.cf = model.cf_tables() or None   # tablas de parecidos entre productos (la de siempre y las de cada versión)
         self.state = build_state(hist_pop, self.mf, self.cf)
         self.blocked: set[str] = set()   # agotados según la última comprobación rápida
         self.users = UserStore()
@@ -610,7 +610,8 @@ def respond(req: Record, version: str, s: State, blocked: set[str], users: UserS
                     w = m.by_version[prefix + "n"]
             items = recommend_v2(req, s, users, m.coviews_idx, w, blocked,
                                  skip_bought=prefix != "v2", cart_first=prefix == "v5",
-                                 cf_fill=bool(m.options.get(prefix, {}).get("cf_fill")))
+                                 cf_fill=bool(m.options.get(prefix, {}).get("cf_fill")),
+                                 cf_table=m.options.get(prefix, {}).get("cf_file") or "")
         else:
             version = version if prefix == "v1" else "v1-coview-trend"
             items = recommend_v1(req, s, m.coviews)

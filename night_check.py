@@ -94,16 +94,14 @@ GROUP BY v ORDER BY v""", timeout=300)
 try:
     import json
     import time
-    from monitor import compare
+    from monitor import compare, stratified
     state = json.loads((REPORT.parent / "night_state.json").read_text())
-    since_t = dt.datetime.strptime(state["since"], "%Y-%m-%d %H:%M").timestamp()
-    for label, start in (("última hora", time.time() - 3600), (f"ronda actual, desde {state['since'][11:]}", since_t)):
-        lines = compare(start, champion=state.get("champion"))
-        say(f"- {label}: {lines[0]}")
-        say("```")
-        for line in lines[1:]:
-            say(line)
-        say("```")
+    lines = compare(time.time() - 3600, champion=state.get("champion"))
+    say(f"- última hora: {lines[0]}")
+    say("```")
+    for line in lines[1:] + stratified(state["periods"], state["champion"]):
+        say(line)
+    say("```")
 except Exception as e:
     say(f"- leaderboard no disponible: {e!r}")
 say()

@@ -6,6 +6,7 @@
     python monitor.py lag [seg]      # cuánto tarda una request en aparecer en shop.requests (def. 20 s)
     python monitor.py lb [min]       # LA MEDIDA BUENA: conversión esperada por versión según el leaderboard (def. 60 min)
     python monitor.py lbs [HH:MM]    # lo mismo desde una hora (aunque sean más de 3 h), con margen de error y z
+    python monitor.py ab             # LA QUE DECIDE: cada versión frente a la campeona, por tramos entre despliegues
     python monitor.py all            # check + conv + latency
 
 Lee TEAM_ID y RAWTREE_API_KEY de .env.
@@ -261,6 +262,50 @@ def compare(start: float, end: float | None = None, champion: str | None = None)
     return lines
 
 
+def stratified(periods: list[str], champion: str, end: float | None = None) -> list[str]:
+    """Comparación de cada versión con la campeona POR TRAMOS (entre dos despliegues el reparto no cambia).
+
+    Si el reparto cambia a mitad de la noche, sumar todo mezclaría horas distintas con pesos distintos para
+    cada versión (y la conversión cambia con la hora). Aquí se calcula la diferencia con la campeona dentro
+    de cada tramo y se combinan los tramos pesando cada uno por su precisión. `periods` = horas de inicio de
+    cada tramo ('YYYY-MM-DD HH:MM', hora local); el último llega hasta ahora."""
+    ts = [dt.datetime.strptime(x, "%Y-%m-%d %H:%M").timestamp() for x in periods] + [end or time.time()]
+    acc: dict[str, dict] = {}
+    for a, b in zip(ts, ts[1:]):
+        if b - a < 900:      # el leaderboard no da ventanas de menos de 15 minutos
+            continue
+        vs, _, _ = since(a, b)
+        if champion not in vs:
+            continue
+        c = vs[champion]
+        for name, x in vs.items():
+            if name == champion:
+                continue
+            var = NOISE_SD ** 2 * (1 / x["n"] + 1 / c["n"])
+            r = acc.setdefault(name, {"w": 0.0, "wd": 0.0, "n": 0, "nc": 0, "s": 0.0, "sc": 0.0, "kd": 0.0, "cd": 0.0, "tramos": 0})
+            r["w"] += 1 / var
+            r["wd"] += (x["conv"] - c["conv"]) / var
+            r["kd"] += (x["known"] - c["known"]) / var
+            r["cd"] += (x["cold"] - c["cold"]) / var
+            r["n"] += x["n"]; r["nc"] += c["n"]; r["s"] += x["conv"] * x["n"]; r["sc"] += c["conv"] * c["n"]; r["tramos"] += 1
+    hhmm = lambda t: dt.datetime.fromtimestamp(t).strftime("%H:%M")
+    lines = [f"cada versión frente a {champion}, por tramos desde {hhmm(ts[0])} (solo los tramos en que corrieron las dos)",
+             f"  {'versión':<20}{'tramos':>7}{'requests':>10}{'conv %':>8}{'campeona':>10}{'diferencia':>12}{'± error':>9}{'z':>7}{'conocidos':>11}{'cold':>8}"]
+    for name, r in sorted(acc.items(), key=lambda kv: -kv[1]["wd"] / kv[1]["w"]):
+        d, se = r["wd"] / r["w"], r["w"] ** -0.5
+        lines.append(f"  {name:<20}{r['tramos']:>7}{r['n']:>10}{r['s'] / r['n']:>8.3f}{r['sc'] / r['nc']:>10.3f}{d:>+12.3f}{se:>9.3f}{d / se:>+7.1f}"
+                     f"{r['kd'] / r['w']:>+11.3f}{r['cd'] / r['w']:>+8.3f}")
+    return lines
+
+
+def ab() -> None:
+    """Comparación por tramos con la campeona, según logs/night_state.json (campos champion y periods)."""
+    st = json.loads(Path("logs/night_state.json").read_text())
+    print("\n" + "\n".join(stratified(st["periods"], st["champion"])))
+    print("  diferencia = puntos de conversión sobre la campeona; z = diferencia / error (|z| < 2: puede ser suerte)")
+    print("  conocidos / cold = la misma diferencia solo con compradores conocidos / nuevos")
+
+
 def lbs(hhmm: str = "") -> None:
     """Comparación desde una hora dada (HH:MM de hoy, o de ayer si aún no ha llegado). Sin hora: 3 h."""
     if hhmm:
@@ -282,6 +327,8 @@ if __name__ == "__main__":
         check(); conv(); latency()
     elif cmd == "lbs":
         lbs(*args)
+    elif cmd == "ab":
+        ab()
     elif cmd in COMMANDS:
         COMMANDS[cmd](*map(int, args))
     else:

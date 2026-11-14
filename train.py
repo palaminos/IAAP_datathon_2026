@@ -31,6 +31,7 @@ import model
 import recommender as rec
 
 NEG_PCT = 30   # % de carruseles sin clic que se usan (los que tienen clic se usan todos)
+NO_REBUY = "--no-rebuy" in sys.argv   # ignora las impresiones de productos que el comprador ya había comprado
 SESSIONS = """
 SELECT user_id::String AS u, context.page::String AS page,
        arrayMap(x -> x.product_id::String, recent_views::Array(JSON)) AS rv,
@@ -62,7 +63,10 @@ def build_examples(sessions, items, users, cov_idx):
         click.append([p == s["clicked"] for p in s["shown"]])
         buy.append([p == s["purchased"] for p in s["shown"]])
         # los carruseles sin clic se muestrearon: cada uno representa a 100/NEG_PCT
-        weight.append(np.full(10, 1.0 if s["sampled"] else 0.0) * (100 / NEG_PCT) if not s["clicked"] else np.ones(10))
+        w = np.full(10, 1.0 if s["sampled"] else 0.0) * (100 / NEG_PCT) if not s["clicked"] else np.ones(10)
+        if NO_REBUY:   # en vivo lo ya comprado no se recompra: esas impresiones no enseñan nada útil
+            w = w * (F[idx, model.FI["p_buy"]] == 0)
+        weight.append(w)
         group.append(np.full(10, len(kept)))
         week.append(np.full(10, s["week"]))
         kept.append(s)
