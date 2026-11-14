@@ -221,7 +221,8 @@ SELECT u, groupArray(k) AS k, groupArray(n) AS n FROM (
     GROUP BY u, k
 ) GROUP BY u"""
 
-# Por usuario: sus productos "fuertes" (visto 2+ veces, o en carrito, o comprado), máximo 40
+# Por usuario: sus productos "fuertes" (visto 2+ veces, o en carrito, o comprado). Primero TODOS los
+# comprados (para poder excluirlos sin que se escape ninguno) y luego los demás, hasta 150 en total.
 USER_PROD = """
 SELECT u, groupArray(p) AS p, groupArray(v) AS v, groupArray(a) AS a, groupArray(b) AS b FROM (
     SELECT e.user_id::String AS u, e.product_id::String AS p,
@@ -231,8 +232,8 @@ SELECT u, groupArray(p) AS p, groupArray(v) AS v, groupArray(a) AS a, groupArray
     WHERE cityHash64(e.user_id::String) % {chunks} = {i} {cond}
     GROUP BY u, p
     HAVING v >= 2 OR a >= 1 OR b >= 1
-    ORDER BY v + 3 * a + 5 * b DESC
-    LIMIT 40 BY u
+    ORDER BY b > 0 DESC, v + 3 * a + 5 * b DESC
+    LIMIT 150 BY u
 ) GROUP BY u"""
 
 

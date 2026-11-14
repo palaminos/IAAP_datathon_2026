@@ -49,7 +49,7 @@ def live_examples():
     state = rec.build_state(rec.hist_popularity())
     items = state.items
     users = model.UserStore()
-    users.load_file(rec.CACHE / "users_history.pkl")
+    users.load_file(rec.CACHE / "users_history_v2.pkl")
     cov_idx = model.index_coviews(rec.load_coviews())
     reqs = sorted((r for i in range(4) for r in rec.query(LIVE.format(team=rec.TEAM, i=i), timeout=300)), key=lambda r: int(r["ms"]))
     reqs = [r for r in reqs if len(r["shown"]) == 10 and all(p in model.PRODUCTS.idx for p in r["shown"])]

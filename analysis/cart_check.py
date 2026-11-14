@@ -20,7 +20,7 @@ from train_live import EVENTS, LAG_MS, LIVE  # noqa: E402
 state = rec.build_state(rec.hist_popularity())
 items = state.items
 users = model.UserStore()
-users.load_file(rec.CACHE / "users_history.pkl")
+users.load_file(rec.CACHE / "users_history_v2.pkl")
 reqs = sorted((r for i in range(4) for r in rec.query(LIVE.format(team=rec.TEAM, i=i), timeout=300)), key=lambda r: int(r["ms"]))
 reqs = [r for r in reqs if len(r["shown"]) == 10 and all(p in model.PRODUCTS.idx for p in r["shown"])]
 recent_from = int(reqs[-1]["ms"]) - 2 * 3600 * 1000   # últimas 2 h: v3/v4

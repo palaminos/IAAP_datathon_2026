@@ -400,7 +400,7 @@ class Background:
 
     def _load_users(self) -> None:
         t = time.time()
-        path = CACHE / "users_history.pkl"
+        path = CACHE / "users_history_v2.pkl"   # v2: incluye todos los productos comprados
         if path.exists():
             self.users.load_file(path)
         else:

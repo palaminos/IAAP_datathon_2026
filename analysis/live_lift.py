@@ -25,7 +25,7 @@ WHERE f.served_by::String = 'team' AND cityHash64(f.request_id::String) % {k} = 
 if __name__ == "__main__":
     state = rec.build_state(rec.hist_popularity())
     users = model.UserStore()
-    users.load_file(rec.CACHE / "users_history.pkl")
+    users.load_file(rec.CACHE / "users_history_v2.pkl")
     cov = model.index_coviews(rec.load_coviews())
     rows = [r for i in range(4) for r in rec.query(ROWS.format(team=rec.TEAM, k=4, i=i), timeout=300)]
     FI = model.FI
