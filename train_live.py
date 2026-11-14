@@ -40,6 +40,10 @@ def _arg(flag: str) -> str | None:
 NAME = _arg("--out") or ("v6" if "--v6" in sys.argv else None)
 V6 = NAME is not None
 DROP = [model.FI[n] for n in (_arg("--drop") or "").split(",") if n]
+# --cap is_new_prod=0.4 : tope al peso final de una señal. Para "producto nuevo" se usa 0,4 = log(1,5), el
+# aumento de compra medido en vivo a igualdad de puesto. Sin tope, el peso aprendido (~1,2) llenaba de
+# productos nuevos el 32 % de los huecos (su cuota real en ventas es ~5 %): el mismo exceso que hundió a v5.
+CAPS = {n: float(v) for n, v in (kv.split("=") for kv in (_arg("--cap") or "").split(",") if kv)}
 OUT = model.WEIGHTS_FILE.with_name(f"model_weights_{NAME}.json" if NAME else "model_weights_live.json")
 LIVE = """
 SELECT f.request_id::String AS rid, r.user_id::String AS u, toUnixTimestamp64Milli(r.ts::DateTime64(3)) AS ms,
@@ -144,7 +148,7 @@ def main() -> None:
     current = model.load_weights()
     # 1) elegir la fuerza de la regularización con la parte de validación
     best_C, best = None, 9.0
-    for C in (0.00003, 0.0001, 0.0003, 0.001, 0.003, 0.01, 0.1):
+    for C in (0.001, 0.003, 0.01, 0.1, 1.0, 10.0):
         w, _ = fit_corrected(current, L, tr, C)
         ll, auc = judge(w, L, tr, va, "buy")
         print(f"  validación C={C:<7} log-loss compra {ll:.5f}  AUC {auc:.4f}")
@@ -156,8 +160,11 @@ def main() -> None:
     lr = LogisticRegression(C=1.0, max_iter=3000).fit(np.hstack([(X[tr | va] - X.mean(0)) / (X.std(0) + 1e-9), onehot(slot[tr | va])]), buy[tr | va])
     cands["solo con datos de hoy"] = (lr.coef_[0][:model.K] / (X.std(0) + 1e-9)).astype(np.float32)
     v4_file = model.WEIGHTS_FILE.with_name("model_weights_live.json")
-    if V6 and v4_file.exists():  # ojo: v4 se entrenó con parte de este tramo de prueba, así que sale favorecido
+    if V6 and v4_file.exists():  # ojo: los pesos ya en producción se entrenaron con parte de este tramo: salen favorecidos
         cands["v4 en producción"] = model.load_weights(v4_file)
+        for f in sorted(model.WEIGHTS_FILE.parent.glob("model_weights_v*.json")):
+            if f != OUT:
+                cands[f"{f.stem.removeprefix('model_weights_')} en producción"] = model.load_weights(f)
     print(f"\nPRUEBA (último 25 % del día, {int(buy[te].sum())} compras, {int(click[te].sum())} clics):")
     res = {}
     for name, w in cands.items():
@@ -182,6 +189,10 @@ def main() -> None:
 
     # 3) pesos finales: histórico + corrección con TODO el feedback de hoy
     final, base = fit_corrected(current, L, np.ones(len(X), bool), best_C)
+    for name, cap in CAPS.items():
+        if final[model.FI[name]] > cap:
+            print(f"tope: {name} {final[model.FI[name]]:.3f} -> {cap}")
+            final[model.FI[name]] = cap
     print("\nPesos (histórico → corregido con hoy):")
     for name, a, b in sorted(zip(model.FEATURES, base, final), key=lambda t: -abs(t[2] - t[1])):
         print(f"  {name:<16}{a:>9.3f} → {b:>8.3f}   ({b - a:+.3f})")
@@ -190,7 +201,7 @@ def main() -> None:
               and res[name_new]["logloss_clic"] < res["pesos actuales (solo histórico)"]["logloss_clic"])
     print(f"\n¿Mejoran a los actuales en la prueba (compra y clic)? {'SÍ' if better else 'NO'}")
     if (better or V6) and "--no-save" not in sys.argv:
-        OUT.write_text(json.dumps({"trained": dt.datetime.now().isoformat(timespec="seconds"), "C": best_C,
+        OUT.write_text(json.dumps({"trained": dt.datetime.now().isoformat(timespec="seconds"), "C": best_C, "caps": CAPS,
                                    "live_responses": len(X) // 10, "live_purchases": int(buy.sum()), "test": res,
                                    "weights": {n: round(float(v), 5) for n, v in zip(model.FEATURES, final)}}, indent=2, ensure_ascii=False))
         print(f"guardado {OUT.name}")

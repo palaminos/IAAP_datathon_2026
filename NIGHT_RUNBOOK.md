@@ -8,15 +8,18 @@ Carpetas: trabajo en `~/Desktop/Q5/Datathon/rawtree` (rama `tarre`); producción
 `~/Desktop/Q5/Datathon/rawtree-prod` (no se edita). Python: `/Applications/anaconda3/bin/python3`.
 Informe acumulado: `logs/night_report.md`.
 
-## Plan de la noche (actualizado el sábado a las 18:45)
+## Plan de la noche (actualizado el sábado a las 18:55)
 
-- Reparto previsto: `v6-similar-users` 50 % + `v7-explore` 50 %. La variante de exploración sortea 10
-  productos entre los 40 mejores de v6 y guarda en `team_23.scratch` (`feature_set = 'explore_v1'`) las
-  probabilidades con que salió cada uno. Convierte menos a propósito: sirve para aprender qué pasa con lo
-  que el modelo normalmente no enseña. **No es para la final.**
-- Lo despliega tarre (o el bucle solo si tarre lo pide expresamente) después de ver la prueba previa.
-- **El bucle NO cambia el modelo ni el reparto esta noche.** Queda anulado el "único cambio permitido" de
-  la versión anterior de este documento.
+Reparto previsto, pendiente de que tarre lo apruebe y lo despliegue tras ver la prueba previa:
+
+| Variante | % | Para qué |
+|---|---|---|
+| `v8-new-products` | 30 | La receta candidata para la final: v6 reentrenado con más feedback + señal de producto nuevo (con tope) |
+| `v6-similar-users` | 30 | Control: lo que corría hasta ahora |
+| `v7-explore` | 40 | Sortea 10 entre los 40 mejores de v8 y guarda en `team_23.scratch` (`feature_set = 'explore_v1'`) las probabilidades. Convierte menos a propósito: sirve para aprender qué pasa con lo que el modelo no suele enseñar. **No es para la final** |
+
+**El bucle NO cambia el modelo ni el reparto esta noche.** Queda anulado el "único cambio permitido" de
+la versión anterior de este documento.
 
 ## En cada despertar
 

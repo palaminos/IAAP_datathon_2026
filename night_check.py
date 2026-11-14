@@ -45,6 +45,13 @@ say(f"**SALUD: {'OK' if healthy else 'PROBLEMA'}** | recomendadores: {n_py}, lan
     f"({r['n']} requests; missing {r['missing']}, late {r['late']}, invalid {r['invalid']}; p99 {r['p99']} ms) | duplicadas 5 min: {d['dup']} de {d['total']}")
 for w in warn:
     say(f"- log: `{w}`")
+try:  # memoria: el Mac tiene 8 GB; si el recomendador crece mucho o el swap se llena, la latencia sufre
+    pid = next(p.split()[0] for p in procs if "python3 -u" in p and "caffeinate" not in p)
+    rss = int(subprocess.run(["ps", "-o", "rss=", "-p", pid], capture_output=True, text=True).stdout.strip() or 0) / 1024
+    swap = subprocess.run(["sysctl", "-n", "vm.swapusage"], capture_output=True, text=True).stdout.strip()
+    say(f"- memoria del recomendador: {rss:.0f} MB en RAM | swap del Mac: {swap[:60]}")
+except Exception:
+    pass
 
 # ---------------------------------------------------------------- A/B
 active = query(f"""SELECT model_version::String v, count() n FROM {TEAM}.submissions

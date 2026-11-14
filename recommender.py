@@ -61,8 +61,9 @@ DRY_RUN = "--dry-run" in sys.argv
 # para el mismo comprador). La clave es la etiqueta model_version que muestra `monitor.py conv`.
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
-    "v6-similar-users": 50, # v4 + "usuarios parecidos" (train_mf.py) + carrito sin compra / visto sin carrito
-    "v7-explore": 50,       # sortea 10 entre los 40 mejores de v6 para aprender (solo en práctica: NO para la final)
+    "v8-new-products": 30,  # v6 reentrenado con más feedback + señal de producto nuevo (tope 0,4), sin las 2 redundantes
+    "v6-similar-users": 30, # v4 + "usuarios parecidos" (train_mf.py) + carrito sin compra / visto sin carrito
+    "v7-explore": 40,       # sortea 10 entre los 40 mejores de v8 para aprender (solo en práctica: NO para la final)
     # "v4-live-weights": 0, # v3 con pesos corregidos con el feedback en vivo. Empató con v6 en vivo (1,76 % vs
     #                         1,77 %) y queda por debajo en la validación temporal (AUC 0,871 vs 0,886)
     # "v5-cart-first": 0,   # v4 + carritos abandonados arriba del todo: PERDIÓ contra v4 en vivo
@@ -74,7 +75,7 @@ VARIANTS: dict[str, int] = {
 }
 
 # Exploración (variantes cuyo nombre acaba en "-explore")
-EXPLORE_BASE = "v6"      # parte de las puntuaciones de esta versión
+EXPLORE_BASE = "v8"      # parte de las puntuaciones de esta versión
 EXPLORE_TOP = 40         # candidatos entre los que se sortea
 EXPLORE_T = 1.0          # temperatura: 1 = cada candidato sale en proporción a su probabilidad estimada de compra
 EXPLORE_DRAWS = 300      # sorteos extra para estimar la probabilidad de cada producto en cada puesto

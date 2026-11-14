@@ -42,6 +42,8 @@ FEATURES = [
     "mf_z",            # la misma, normalizada dentro del usuario (cuánto destaca este producto para él)
     "cart_no_buy",     # 1 si lo metió en el carrito y no lo ha comprado
     "viewed_no_cart",  # 1 si lo ha visto pero nunca lo metió en el carrito ni lo compró
+    # --- añadida en v8 ---
+    "is_new_prod",     # 1 si el producto se lanzó durante el evento (new_product en shop.catalog_updates)
 ]
 K = len(FEATURES)
 FI = {name: i for i, name in enumerate(FEATURES)}
@@ -94,6 +96,7 @@ class Items:
         self.cat = np.zeros(n, np.int32)
         self.brand = np.zeros(n, np.int32)
         self.avail = np.zeros(n, bool)
+        self.is_new = np.zeros(n, np.float32)
         price = np.ones(n)
         pop = np.zeros(n)
         for pid, info in product.items():
@@ -103,6 +106,7 @@ class Items:
             price[i] = max(float(info.get("price_eur") or 1.0), 0.5)
             pop[i] = popularity.get(pid, 0.0)
             self.avail[i] = pid in available
+            self.is_new[i] = float(info.get("is_new") in (1, True, "1", "true"))
         self.nsub, self.ncat = len(SUBS), len(CATS)
         self.sub2cat = np.zeros(self.nsub, np.int32)
         self.sub2cat[self.sub] = self.cat
@@ -289,6 +293,7 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
     n = items.n
     F = np.zeros((n, K), np.float32)
     F[:, STATIC] = items.static
+    F[:, FI["is_new_prod"]] = items.is_new
 
     row = users.row.get(user_id) if users is not None else None
     if row is not None:

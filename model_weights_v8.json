@@ -1,0 +1,67 @@
+{
+  "trained": "2026-11-14T18:50:05",
+  "C": 10.0,
+  "live_responses": 65082,
+  "live_purchases": 800,
+  "test": {
+    "pesos actuales (solo histórico)": {
+      "logloss_compra": 0.011691987293220471,
+      "auc_compra": 0.7908370433036068,
+      "logloss_clic": 0.02991360716546017,
+      "auc_clic": 0.7657454431392623
+    },
+    "corregidos con hoy (C=10.0)": {
+      "logloss_compra": 0.011024047936755717,
+      "auc_compra": 0.8400491940097385,
+      "logloss_clic": 0.029103130997825886,
+      "auc_clic": 0.7847650782373863
+    },
+    "solo con datos de hoy": {
+      "logloss_compra": 0.011129236088992226,
+      "auc_compra": 0.8339992251528284,
+      "logloss_clic": 0.02882415398049128,
+      "auc_clic": 0.7962387181659591
+    },
+    "v4 en producción": {
+      "logloss_compra": 0.01124855018291899,
+      "auc_compra": 0.8286307695041308,
+      "logloss_clic": 0.029112392804083502,
+      "auc_clic": 0.7869677644023569
+    },
+    "v6 en producción": {
+      "logloss_compra": 0.01150632456941603,
+      "auc_compra": 0.8043276461180991,
+      "logloss_clic": 0.02931994799096297,
+      "auc_clic": 0.784087167980184
+    }
+  },
+  "weights": {
+    "sub_share": 0.87815,
+    "sub_log": -0.21687,
+    "cat_share": 1.94805,
+    "brand_share": -0.26857,
+    "p_view": -1.49059,
+    "p_cart": 3.69708,
+    "p_buy": -4.64198,
+    "in_session": 1.1716,
+    "is_last": 0.35497,
+    "same_sub": -0.1234,
+    "same_cat": 0.95059,
+    "sess_sub_share": 0.49348,
+    "coview": -0.04398,
+    "pop_sub": -0.49161,
+    "pop_glob": 10.47806,
+    "log_price": -0.06665,
+    "mf": -0.19171,
+    "mf_z": 0.16533,
+    "cart_no_buy": 0.0,
+    "viewed_no_cart": 0.0,
+    "is_new_prod": 0.4
+  },
+  "learned_before_cap": {
+    "is_new_prod": 1.27651
+  },
+  "caps": {
+    "is_new_prod": 0.4
+  }
+}
