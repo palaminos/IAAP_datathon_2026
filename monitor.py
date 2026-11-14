@@ -5,6 +5,7 @@
     python monitor.py latency [min]  # fiabilidad: a tiempo vs fallback (missing/late/invalid) y latencias
     python monitor.py lag [seg]      # cuánto tarda una request en aparecer en shop.requests (def. 20 s)
     python monitor.py lb [min]       # LA MEDIDA BUENA: conversión esperada por versión según el leaderboard (def. 60 min)
+    python monitor.py lbs [HH:MM]    # lo mismo desde una hora (aunque sean más de 3 h), con margen de error y z
     python monitor.py all            # check + conv + latency
 
 Lee TEAM_ID y RAWTREE_API_KEY de .env.
@@ -197,12 +198,90 @@ def lb(minutes: int = 60) -> None:
     print("  Con menos de ~1.000 requests por versión, diferencias de 0,15 puntos aún pueden ser ruido.")
 
 
+NOISE_SD = 4.0   # desviación típica de la conversión esperada de UNA request, en puntos (medida el sábado
+                 # con ventanas vecinas de una misma versión y con el par gemelo v6/v10 sin rebajas: 3,5-4,5)
+
+
+def _fetch(a: int, b: int) -> dict:
+    import urllib.request
+    req = urllib.request.Request(f"{LEADERBOARD}&from={a}&to={b}", headers={"User-Agent": "datathon-client"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def since(start: float, end: float | None = None) -> tuple[dict, dict, tuple[int, int]]:
+    """Suma de ventanas del leaderboard entre `start` y `end` (epoch), para periodos de más de 3 horas.
+    Devuelve ({versión: {n, conv, cold_n, cold, known}}, {"reference": %, "baseline": %}, (desde, hasta)).
+    `known` = conversión con compradores conocidos (los que no son cold start)."""
+    to = int(end or time.time()) // 300 * 300
+    frm = min(-(-int(start) // 300) * 300, to - 900)
+    k = -(-(to - frm) // 10800)
+    cuts = [frm + round((to - frm) * i / k / 300) * 300 for i in range(k)] + [to]
+    acc: dict[str, dict] = {}
+    ref = {"reference": [0.0, 0], "baseline": [0.0, 0]}
+    for a, b in zip(cuts, cuts[1:]):
+        d = _fetch(a, b)
+        for key in ref:
+            ref[key][0] += d[key]["conversion"] * d[key]["requests"]
+            ref[key][1] += d[key]["requests"]
+        me = next((t for t in d["teams"] if t["team_id"] == TEAM), None)
+        for v in (me or {}).get("versions", []):
+            x = acc.setdefault(v["model_version"], {"n": 0, "s": 0.0, "cold_n": 0, "cold_s": 0.0})
+            x["n"] += v["requests"]
+            x["s"] += v["conversion"] * v["requests"]
+            x["cold_n"] += v.get("cold_requests", 0)
+            x["cold_s"] += v.get("cold_conversion", 0.0) * v.get("cold_requests", 0)
+    out = {}
+    for name, x in acc.items():
+        kn = x["n"] - x["cold_n"]
+        out[name] = {"n": x["n"], "conv": x["s"] / x["n"], "cold_n": x["cold_n"],
+                     "cold": x["cold_s"] / x["cold_n"] if x["cold_n"] else float("nan"),
+                     "known": (x["s"] - x["cold_s"]) / kn if kn else float("nan")}
+    return out, {k: v[0] / v[1] if v[1] else float("nan") for k, v in ref.items()}, (frm, to)
+
+
+def zscore(a: dict, b: dict) -> float:
+    """Cuántos márgenes de error separan la conversión de `a` de la de `b` (|z| < 2: puede ser suerte)."""
+    return (a["conv"] - b["conv"]) / (NOISE_SD * (1 / a["n"] + 1 / b["n"]) ** 0.5)
+
+
+def compare(start: float, end: float | None = None, champion: str | None = None) -> list[str]:
+    """Líneas de texto con la comparación de versiones entre `start` y `end`, cada una frente a la campeona."""
+    vs, ref, (a, b) = since(start, end)
+    hhmm = lambda t: dt.datetime.fromtimestamp(t).strftime("%H:%M")
+    lines = [f"leaderboard {hhmm(a)}–{hhmm(b)} (conversión esperada) | referencia {ref['reference']:.3f} % | baseline {ref['baseline']:.3f} %"]
+    if not vs:
+        return lines + ["  (sin versiones con suficientes requests)"]
+    champ = champion if champion in vs else max(vs, key=lambda k: vs[k]["n"])
+    lines.append(f"  {'versión':<22}{'requests':>9}{'conv %':>8}{'± error':>9}{'conocidos':>11}{'cold':>8}{'vs campeona':>13}{'z':>7}")
+    for name, x in sorted(vs.items(), key=lambda kv: -kv[1]["conv"]):
+        z = "" if name == champ else f"{zscore(x, vs[champ]):+.1f}"
+        diff = "(campeona)" if name == champ else f"{x['conv'] - vs[champ]['conv']:+.3f}"
+        lines.append(f"  {name:<22}{x['n']:>9}{x['conv']:>8.3f}{NOISE_SD / x['n'] ** 0.5:>9.3f}{x['known']:>11.3f}{x['cold']:>8.3f}{diff:>13}{z:>7}")
+    return lines
+
+
+def lbs(hhmm: str = "") -> None:
+    """Comparación desde una hora dada (HH:MM de hoy, o de ayer si aún no ha llegado). Sin hora: 3 h."""
+    if hhmm:
+        t = dt.datetime.combine(dt.date.today(), dt.time.fromisoformat(hhmm))
+        if t > dt.datetime.now():
+            t -= dt.timedelta(days=1)
+        start = t.timestamp()
+    else:
+        start = time.time() - 10800
+    print("\n" + "\n".join(compare(start)))
+    print("  z = diferencia medida en márgenes de error. Con |z| < 2 la diferencia puede ser suerte.")
+
+
 COMMANDS = {"check": check, "conv": conv, "latency": latency, "lag": lag, "lb": lb}
 
 if __name__ == "__main__":
     cmd, *args = sys.argv[1:] or ["all"]
     if cmd == "all":
         check(); conv(); latency()
+    elif cmd == "lbs":
+        lbs(*args)
     elif cmd in COMMANDS:
         COMMANDS[cmd](*map(int, args))
     else:

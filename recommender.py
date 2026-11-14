@@ -61,15 +61,17 @@ DRY_RUN = "--dry-run" in sys.argv
 # para el mismo comprador). La clave es la etiqueta model_version que muestra `monitor.py conv`.
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
-    "v6-similar-users": 60, # LA MEJOR VALIDADA: v4 + "usuarios parecidos". Siempre con la mayoría del tráfico
-    "v8-new-products": 20,  # candidata: v6 reentrenado con más feedback + señal de producto nuevo (tope 0,4)
-    "v10-sale": 20,         # candidata: v6 + empujón a los productos rebajados (0,8). Sin rebajas es idéntica a v6,
-                            # así que fuera de las ventanas de rebajas mide el ruido del leaderboard
-    # Retiradas (resultado en vivo según el leaderboard, misma ventana):
-    #   v9-organic      1,20 % frente a 1,46 % de v6  -> no usar
-    #   v5-cart-first   1,29 % frente a 1,80 % de v4  -> no usar
-    #   v4-live-weights 1,48 % frente a 1,68 % de v6
-    #   v7-explore / v7b-explore-v6: sorteos para aprender; bajan la conversión del equipo. Solo si se decide a propósito
+    # Ronda 1 de la noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12, así que esta
+    # noche se reparte el tráfico para APRENDER: la campeona con un tercio y cuatro candidatas serias.
+    "v6-similar-users": 32, # campeona: la mejor validada hasta ahora (v4 + "usuarios parecidos")
+    "v8-new-products": 17,  # v6 reentrenado con más feedback + señal de producto nuevo (tope 0,4)
+    "v12-cf": 17,           # v8 + filtrado colaborativo: parecido a lo que el comprador metió en el carrito o compró
+    "v10-sale": 17,         # v6 + empujón a los productos rebajados (0,8). Sin rebajas es idéntica a v6: mide el ruido
+    "v9-organic": 17,       # segunda oportunidad (la pidió tarre): perdió con solo 1.300 requests (z = -2,0)
+    # Retiradas (conversión esperada del leaderboard, misma ventana):
+    #   v5-cart-first   1,24 % frente a 1,53 % de v4 (z = -3,0)  -> no usar
+    #   v4-live-weights 1,53 % frente a 1,66 % de v6 (z = -2,5)
+    #   v7-explore / v7b-explore-v6: sorteos para aprender; bajan la conversión. Solo si se decide a propósito
 }
 
 # Exploración: variante -> versión de cuyas puntuaciones parte el sorteo.
@@ -282,7 +284,8 @@ def fair_new_popularity(pop: dict[str, float], hist_pop: dict[str, float], live_
 
 
 def make_state(product: dict[str, Record], available: set[str], hist_pop: dict[str, float],
-               live_pop: dict[str, float], new_age: dict[str, float] | None = None, mf: dict | None = None) -> State:
+               live_pop: dict[str, float], new_age: dict[str, float] | None = None, mf: dict | None = None,
+               cf: dict | None = None) -> State:
     """Ordena el catálogo por popularidad: histórico + última hora (que pesa x2: tendencias)."""
     # log1p para que los superventas no lo aplasten todo
     pop = {p: math.log1p(hist_pop.get(p, 0)) + 2 * math.log1p(live_pop.get(p, 0)) for p in product}
@@ -299,7 +302,7 @@ def make_state(product: dict[str, Record], available: set[str], hist_pop: dict[s
         if len(by_sub[info["subcategory"]]) < 30:
             by_sub[info["subcategory"]].append(p)
     s.top_by_cat, s.top_by_subcat = dict(by_cat), dict(by_sub)
-    s.items = Items(product, pop, available, mf)
+    s.items = Items(product, pop, available, mf, cf)
     return s
 
 
@@ -312,7 +315,7 @@ def stock_changes() -> dict[str, str]:
         raise
 
 
-def build_state(hist_pop: dict[str, float], mf: dict | None = None) -> State:
+def build_state(hist_pop: dict[str, float], mf: dict | None = None, cf: dict | None = None) -> State:
     try:
         rows = query(CATALOG.format(updates=CATALOG_UPDATES))
     except Exception:  # antes de abrir el stream catalog_updates no tiene columnas
@@ -331,7 +334,7 @@ def build_state(hist_pop: dict[str, float], mf: dict | None = None) -> State:
         new_age = {r["product_id"]: float(r["age_min"]) for r in query(NEW_PRODUCTS)}
     except Exception:
         new_age = {}
-    return make_state(product, available, hist_pop, live, new_age, mf)
+    return make_state(product, available, hist_pop, live, new_age, mf, cf)
 
 
 # --------------------------------------------------------------------------- modelos
@@ -445,7 +448,8 @@ class Background:
     def __init__(self, hist_pop: dict[str, float]):
         self.hist_pop = hist_pop
         self.mf = model.load_mf()   # factores de "usuarios parecidos"; None si no está mf_factors.npz
-        self.state = build_state(hist_pop, self.mf)
+        self.cf = model.load_cf()   # similitud producto-producto; None si no está cf_sim.npz
+        self.state = build_state(hist_pop, self.mf, self.cf)
         self.blocked: set[str] = set()   # agotados según la última comprobación rápida
         self.users = UserStore()
         self.users_ready = False
@@ -514,7 +518,7 @@ class Background:
             time.sleep(REFRESH_S)
             try:
                 t = time.time()
-                self.state = build_state(self.hist_pop, self.mf)  # reemplazo atómico de la referencia
+                self.state = build_state(self.hist_pop, self.mf, self.cf)  # reemplazo atómico de la referencia
                 self.users.ensure_cols()
                 n = self._update_users()
                 print(f"refresco en {time.time() - t:.1f}s: {len(self.state.available)} productos disponibles, "

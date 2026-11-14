@@ -48,6 +48,9 @@ FEATURES = [
     "organic",         # salida de un GBM entrenado con la actividad orgánica de la tienda (train_organic.py)
     # --- añadida en v10 ---
     "on_sale",         # 1 si el producto está rebajado ahora (precio actual < 95 % de su precio base)
+    # --- añadidas en v12 ---
+    "cf",              # filtrado colaborativo: parecido a lo que el usuario metió en el carrito o compró (train_cf.py)
+    "cf_any",          # 1 si tiene algún parecido con eso (los que no tienen ninguno casi nunca se compran)
 ]
 K = len(FEATURES)
 FI = {name: i for i, name in enumerate(FEATURES)}
@@ -57,6 +60,29 @@ MF_FILE = Path(__file__).with_name("mf_factors.npz")
 EVENT_MF = {"view": math.log1p(1), "add_to_cart": math.log1p(3), "purchase": math.log1p(5)}
 
 
+CTX_FILE = Path(__file__).with_name("ctx_tables.json")
+CF_FILE = Path(__file__).with_name("cf_sim.npz")
+_CF: dict = {"n": 0, "S": None}   # matriz de similitud ya traducida a los números de este proceso
+
+
+def load_cf(path: Path = CF_FILE) -> dict | None:
+    """Similitud producto-producto (train_cf.py). None si no existe el fichero."""
+    if not path.exists():
+        return None
+    d = np.load(path)
+    return {"products": d["products"].tolist(), "i": d["i"], "j": d["j"], "v": d["v"], "scale": float(d["scale"])}
+
+
+def cf_matrix(cf: dict, n: int):
+    """Matriz dispersa n x n (fila = producto que le gustó, columna = candidato). Solo se rehace si el
+    catálogo ha crecido: los números de los productos ya conocidos no cambian nunca."""
+    if _CF["S"] is None or _CF["n"] != n:
+        from scipy.sparse import csr_matrix
+        lookup = np.array([PRODUCTS.idx.get(p, -1) for p in cf["products"]], np.int64)
+        i, j = lookup[cf["i"]], lookup[cf["j"]]
+        ok = (i >= 0) & (j >= 0)
+        _CF["S"], _CF["n"] = csr_matrix((cf["v"][ok], (i[ok], j[ok])), shape=(n, n)), n
+    return _CF["S"]
 ORGANIC_FILE = Path(__file__).with_name("organic_gbm.pkl")
 _ORGANIC: list = [False, None]   # [ya se intentó cargar, (modelo, columnas) o None]
 
@@ -118,7 +144,7 @@ class Items:
     """El catálogo como columnas numéricas alineadas con PRODUCTS. Se reconstruye en cada refresco."""
 
     def __init__(self, product: dict[str, dict], popularity: dict[str, float], available: set[str],
-                 mf: dict | None = None):
+                 mf: dict | None = None, cf: dict | None = None):
         for pid, info in product.items():
             PRODUCTS.add(pid), SUBS.add(info["subcategory"]), CATS.add(info["category"]), BRANDS.add(info.get("brand") or "")
         n = self.n = len(PRODUCTS)
@@ -159,6 +185,8 @@ class Items:
             rank_sub[i] = seen_in_sub[self.sub[i]]
         self.static = np.stack([1 / np.sqrt(rank_sub), 1 - rank_glob / n, np.log(price)], axis=1).astype(np.float32)
         self.pop = pop
+        self.cf = cf_matrix(cf, n) if cf is not None else None
+        self.cf_scale = cf["scale"] if cf is not None else 1.0
         # Factores de cada producto para la señal de "usuarios parecidos" (ceros si es nuevo: aún no los tiene)
         self.mfV = None
         if mf is not None:
@@ -347,6 +375,12 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
                     F[i, 4], F[i, 5], F[i, 6] = math.log1p(v), math.log1p(a), math.log1p(b)
                     if not b:
                         F[i, FI["cart_no_buy" if a else "viewed_no_cart"]] = 1.0
+            if items.cf is not None:
+                liked = [i for i, packed in list(mine.items()) if i < n and ((packed >> 20) & MASK or packed >> 40)]
+                if liked:   # suma de parecidos con todo lo que metió en el carrito o compró
+                    sim = np.asarray(items.cf[liked].sum(0)).ravel()
+                    F[:, FI["cf"]] = np.log1p(items.cf_scale * sim)
+                    F[:, FI["cf_any"]] = sim > 0
         if users.mf is not None and items.mfV is not None and row < len(users.mf):
             vec = users.mf[row]
             known = items.mf_known

@@ -67,7 +67,7 @@ ORDER BY ts"""
 def live_examples():
     """Una fila por producto mostrado hoy, con las señales tal como eran en el momento de la request."""
     mf = model.load_mf()
-    state = rec.build_state(rec.hist_popularity(), mf)
+    state = rec.build_state(rec.hist_popularity(), mf, model.load_cf())
     items = state.items
     users = model.UserStore()
     users.load_file(rec.CACHE / "users_history_v2.pkl")
