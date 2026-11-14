@@ -29,6 +29,16 @@ if [ -z "$PYTHON" ]; then
 fi
 echo "Usando $PYTHON"
 
+# Solo un lanzador a la vez: dos lanzadores = dos recomendadores = respuestas duplicadas.
+OTHER=$(pgrep -f "^(/bin/)?bash [^ ]*run_forever\.sh" | grep -v "^$$\$" | head -1)
+if [ -n "$OTHER" ]; then
+    echo "Ya hay un lanzador de producción corriendo (pid $OTHER). No arranco otro."
+    echo "  Ver qué hace:        tail -f logs/production.log"
+    echo "  Poner otra versión:  ./deploy.sh        (no hace falta parar nada)"
+    echo "  Pararlo del todo:    ./stop.sh"
+    exit 1
+fi
+
 if pgrep -f "python3 -u .*recommender" >/dev/null; then
     echo "Parando el recomendador que ya corría en este Mac..."
     pkill -f "python3 -u .*recommender"

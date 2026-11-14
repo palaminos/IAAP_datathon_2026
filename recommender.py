@@ -61,23 +61,15 @@ DRY_RUN = "--dry-run" in sys.argv
 # para el mismo comprador). La clave es la etiqueta model_version que muestra `monitor.py conv`.
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
-    "v6-similar-users": 20, # control: v4 + "usuarios parecidos" + carrito sin compra / visto sin carrito
-    "v8-new-products": 20,  # v6 reentrenado con más feedback + señal de producto nuevo (tope 0,4), sin las 2 redundantes
-    "v10-sale": 20,         # APUESTA: v6 + empujón a los productos rebajados (peso 0,8 puesto a mano). Fuera de las
-                            # ventanas de rebajas es idéntica a v6: sirve además para medir el ruido del leaderboard
-    "v7-explore": 20,       # sortea 10 entre los 40 mejores de v9 (ver EXPLORE). Solo en práctica: NO para la final
-    "v7b-explore-v6": 20,   # lo mismo, pero sorteando entre los 40 mejores de v6
-    # "v9-organic": 0,      # v8 + señal orgánica (GBM de vistas orgánicas). PERDIÓ en vivo según el leaderboard:
-    #                         1,17 % de conversión esperada frente a 1,45 % de v6 (y 1,22 % vs 1,83 % en cold),
-    #                         pese a predecir mejor offline (AUC 0,86 vs 0,80). No usar.
-    # "v4-live-weights": 0, # v3 con pesos corregidos con el feedback en vivo. Empató con v6 en vivo (1,76 % vs
-    #                         1,77 %) y queda por debajo en la validación temporal (AUC 0,871 vs 0,886)
-    # "v5-cart-first": 0,   # v4 + carritos abandonados arriba del todo: PERDIÓ contra v4 en vivo
-    #                         (1,29 % vs 2,26 % de conversión, -38 % de clics, 14-nov). Forzar todos los
-    #                         carritos desplaza productos mejores; v4 ya sube los que merecen la pena.
-    # "v3-no-rebuy": 0,     # v2 + no recomendar lo ya comprado. Empate con v4 en vivo (1,43 % vs 1,57 %, 14-nov)
-    # "v2-user-lr": 0,      # iba por detrás de v3 en vivo (14-nov)
-    # "v1-coview-trend": 0, # perdió contra v2 en vivo (0,53 % vs 1,13 % de conversión, 14-nov)
+    "v6-similar-users": 60, # LA MEJOR VALIDADA: v4 + "usuarios parecidos". Siempre con la mayoría del tráfico
+    "v8-new-products": 20,  # candidata: v6 reentrenado con más feedback + señal de producto nuevo (tope 0,4)
+    "v10-sale": 20,         # candidata: v6 + empujón a los productos rebajados (0,8). Sin rebajas es idéntica a v6,
+                            # así que fuera de las ventanas de rebajas mide el ruido del leaderboard
+    # Retiradas (resultado en vivo según el leaderboard, misma ventana):
+    #   v9-organic      1,20 % frente a 1,46 % de v6  -> no usar
+    #   v5-cart-first   1,29 % frente a 1,80 % de v4  -> no usar
+    #   v4-live-weights 1,48 % frente a 1,68 % de v6
+    #   v7-explore / v7b-explore-v6: sorteos para aprender; bajan la conversión del equipo. Solo si se decide a propósito
 }
 
 # Exploración: variante -> versión de cuyas puntuaciones parte el sorteo.

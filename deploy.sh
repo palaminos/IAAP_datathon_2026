@@ -16,6 +16,18 @@
 set -u
 DIR="$(pwd)"
 fail() { echo "✗ $1"; echo "  Producción NO se ha tocado."; exit 1; }
+LAUNCHER="^(/bin/)?bash [^ ]*run_forever\\.sh"
+
+start_launcher() {
+    # Arranca el lanzador suelto de cualquier terminal: sigue vivo aunque se cierre esta ventana.
+    nohup ./run_forever.sh > /dev/null 2>&1 &
+    for _ in $(seq 1 45); do
+        sleep 1
+        if tail -6 logs/production.log 2>/dev/null | grep -q "listo:"; then break; fi
+    done
+    tail -6 logs/production.log | grep "listo:" || echo "AVISO: aún no veo 'listo:' en logs/production.log"
+    echo "✓ Producción arrancada en segundo plano. Para verla: tail -f logs/production.log · Para pararla: ./stop.sh"
+}
 
 git rev-parse --git-dir >/dev/null 2>&1 || fail "Esta carpeta no es el repositorio. Haz: cd ~/Desktop/Q5/Datathon/rawtree-prod"
 if BRANCH=$(git symbolic-ref -q --short HEAD); then
@@ -41,9 +53,8 @@ if [ "$NEW" = "$OLD" ]; then
     if pgrep -f "python3 -u .*recommender" >/dev/null; then
         echo "✓ Y el recomendador está corriendo."
     else
-        echo "✗ PERO NO HAY NINGÚN RECOMENDADOR CORRIENDO: producción está PARADA."
-        echo "  Lánzalo ya en la terminal de producción:  ./run_forever.sh"
-        exit 1
+        echo "✗ No había ningún recomendador corriendo: lo arranco en segundo plano."
+        start_launcher
     fi
     exit 0
 fi
@@ -79,7 +90,7 @@ git checkout -q --detach "$NEW" || fail "git no pudo cambiar de versión."
 echo "✓ Código cambiado a: $(git log --oneline -1)"
 if [ "${NO_RESTART:-}" = 1 ]; then
     echo "NO_RESTART=1: código cambiado, recomendador sin reiniciar."
-elif pgrep -f "run_forever.sh" >/dev/null; then
+elif pgrep -f "$LAUNCHER" >/dev/null; then
     pkill -f "python3 -u .*recommender"
     echo "Reiniciando el recomendador (run_forever.sh lo relanza solo)..."
     for _ in $(seq 1 40); do
@@ -89,5 +100,6 @@ elif pgrep -f "run_forever.sh" >/dev/null; then
     tail -5 logs/production.log | grep "listo:" || echo "AVISO: aún no veo 'listo:' en logs/production.log; mira la terminal de producción."
     echo "✓ Desplegado. Para volver atrás: ./deploy.sh --rollback"
 else
-    echo "No hay ningún run_forever.sh corriendo. Lánzalo:  ./run_forever.sh"
+    echo "No había ningún lanzador corriendo (¿se paró con Ctrl+C?): lo arranco yo."
+    start_launcher
 fi
