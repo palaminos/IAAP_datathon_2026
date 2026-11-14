@@ -14,9 +14,9 @@ SCRIPT="${1:-recommender_v1.py}"
 mkdir -p logs
 LOG=logs/production.log
 
-if pgrep -f "recommender.*\.py" >/dev/null; then
+if pgrep -f "python3 -u .*recommender" >/dev/null; then
     echo "Parando el recomendador que ya corría en este Mac..."
-    pkill -f "recommender.*\.py"
+    pkill -f "python3 -u .*recommender"
     sleep 1
 fi
 
