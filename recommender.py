@@ -119,6 +119,13 @@ WHERE change::String IN ('out_of_stock', 'back_in_stock')
 GROUP BY product_id"""
 """Último cambio de stock de cada producto."""
 
+NEW_PRODUCTS = """
+SELECT product_id::String AS product_id, dateDiff('minute', min(ts::DateTime64(3)), now()) AS age_min
+FROM shop.catalog_updates
+WHERE change::String = 'new_product'
+GROUP BY product_id"""
+"""Productos añadidos durante el evento y cuántos minutos llevan en la tienda."""
+
 POPULARITY = """
 SELECT product_id::String AS product_id,
        countIf(event_type = 'purchase')    AS buys,
@@ -209,11 +216,38 @@ def load_coviews(until: str | None = None) -> dict[str, list[str]]:
     return dict(cov)
 
 
+def fair_new_popularity(pop: dict[str, float], hist_pop: dict[str, float], live_pop: dict[str, float],
+                        new_age: dict[str, float]) -> int:
+    """Corrige la popularidad de los productos nuevos (cold start). Devuelve cuántos ha corregido.
+
+    Un producto nuevo no tiene 14 días de historia, así que al sumar "histórico + última hora" siempre
+    quedaba hundido aunque hoy se venda como un superventas. Aquí se le estima la parte histórica que
+    le falta: la que tienen los productos antiguos que hoy venden a un ritmo parecido (recta ajustada
+    sobre los antiguos). Con menos de 5 minutos de vida no hay datos fiables: se deja sin popularidad
+    y model.Items le pone la mediana de su subcategoría."""
+    old = [(math.log1p(live_pop[p]), math.log1p(h)) for p, h in hist_pop.items() if h > 0 and live_pop.get(p, 0) > 0]
+    if len(old) < 50:
+        return 0
+    x, y = np.array(old).T
+    slope, intercept = np.polyfit(x, y, 1)
+    fixed = 0
+    for p, age_min in new_age.items():
+        live = live_pop.get(p, 0)
+        if p not in pop or hist_pop.get(p, 0) > 0 or age_min < 5 or live <= 0:
+            continue
+        rate = math.log1p(live * 60 / min(60.0, age_min))   # ventas por hora, aunque lleve menos de una hora
+        pop[p] = min(max(intercept + slope * rate, 0.0), float(y.max())) + 2 * rate
+        fixed += 1
+    return fixed
+
+
 def make_state(product: dict[str, Record], available: set[str], hist_pop: dict[str, float],
-               live_pop: dict[str, float]) -> State:
+               live_pop: dict[str, float], new_age: dict[str, float] | None = None) -> State:
     """Ordena el catálogo por popularidad: histórico + última hora (que pesa x2: tendencias)."""
     # log1p para que los superventas no lo aplasten todo
     pop = {p: math.log1p(hist_pop.get(p, 0)) + 2 * math.log1p(live_pop.get(p, 0)) for p in product}
+    if new_age:
+        fair_new_popularity(pop, hist_pop, live_pop, new_age)
     s = State(product=product, available=available)
     ranked = sorted(available, key=lambda p: pop[p], reverse=True)
     s.top_global = ranked[:200]
@@ -253,7 +287,11 @@ def build_state(hist_pop: dict[str, float]) -> State:
     except Exception as e:
         print(f"popularidad en vivo no disponible: {e}")
         live = {}
-    return make_state(product, available, hist_pop, live)
+    try:
+        new_age = {r["product_id"]: float(r["age_min"]) for r in query(NEW_PRODUCTS)}
+    except Exception:
+        new_age = {}
+    return make_state(product, available, hist_pop, live, new_age)
 
 
 # --------------------------------------------------------------------------- modelos
