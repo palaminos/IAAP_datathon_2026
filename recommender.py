@@ -53,9 +53,9 @@ DRY_RUN = "--dry-run" in sys.argv
 # para el mismo comprador). La clave es la etiqueta model_version que muestra `monitor.py conv`.
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
-    "v5-cart-first": 50,    # v3 + los productos que el usuario dejó en el carrito sin comprar, arriba del todo
-    "v3-no-rebuy": 50,      # v2 + no recomendar lo que el usuario ya compró
-    # "v4-live-weights": 0, # v3 con pesos corregidos con el feedback en vivo: no ganó a v3 (1,36 % vs 1,61 %)
+    "v5-cart-first": 50,    # v4 + los productos que el usuario dejó en el carrito sin comprar, arriba del todo
+    "v4-live-weights": 50,  # v3 con los pesos corregidos con nuestro feedback en vivo (train_live.py)
+    # "v3-no-rebuy": 0,     # v2 + no recomendar lo ya comprado. Empate con v4 en vivo (1,43 % vs 1,57 %, 14-nov)
     # "v2-user-lr": 0,      # iba por detrás de v3 en vivo (14-nov)
     # "v1-coview-trend": 0, # perdió contra v2 en vivo (0,53 % vs 1,13 % de conversión, 14-nov)
 }
@@ -330,7 +330,7 @@ def recommend_v2(req: Record, s: State, users: UserStore, coviews_idx: dict[int,
     F = model.featurize(req.get("user_id") or "", req.get("recent_views"), s.items, users, coviews_idx)
     score = F @ weights
     if cart_first:
-        # v5: lo que dejó en el carrito sin comprar va primero (ordenado entre sí por su puntuación). En el
+        # v5 (sobre los pesos de v4): lo que dejó en el carrito sin comprar va primero (ordenado entre sí por su puntuación). En el
         # feedback del 14-nov se compra 4-7 veces más que un producto normal en la misma posición, y solo
         # enseñábamos el 15 % de esos productos (analysis/cart_check.py).
         score[(F[:, model.FI["p_cart"]] > 0) & (F[:, model.FI["p_buy"]] == 0)] += 1000.0
@@ -437,7 +437,7 @@ def main() -> None:
     weights = model.load_weights() if model.WEIGHTS_FILE.exists() else None
     live_file = model.WEIGHTS_FILE.with_name("model_weights_live.json")
     weights_live = model.load_weights(live_file) if live_file.exists() else None
-    if weights_live is None and any(v.startswith("v4") for v in VARIANTS):
+    if weights_live is None and any(v.startswith(("v4", "v5")) for v in VARIANTS):
         print("AVISO: falta model_weights_live.json (ejecuta train_live.py); v4 usará los pesos del histórico")
     if weights is None:
         print("AVISO: falta model_weights.json (ejecuta train.py); los compradores de v2 recibirán v1")
@@ -464,7 +464,7 @@ def main() -> None:
                     try:
                         version = pick_variant(req)
                         if version.startswith(("v2", "v3", "v4", "v5")) and weights is not None:
-                            w = weights_live if version.startswith("v4") and weights_live is not None else weights
+                            w = weights_live if version.startswith(("v4", "v5")) and weights_live is not None else weights
                             items = recommend_v2(req, s, bg.users, coviews_idx, w, blocked,
                                                  skip_bought=not version.startswith("v2"),
                                                  cart_first=version.startswith("v5"))
