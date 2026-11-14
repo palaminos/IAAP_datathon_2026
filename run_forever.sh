@@ -1,7 +1,7 @@
 #!/bin/bash
 # Lanza el recomendador en producción y lo vuelve a arrancar si se cae.
 #
-#   ./run_forever.sh                      # recommender_v1.py
+#   ./run_forever.sh                      # recommender.py
 #   ./run_forever.sh otro_recommender.py  # otro script
 #
 # - Para cualquier recomendador que ya estuviera corriendo en ESTE Mac (para no responder dos veces).
@@ -10,7 +10,7 @@
 # - Para pararlo: Ctrl+C en esta terminal.
 
 cd "$(dirname "$0")" || exit 1
-SCRIPT="${1:-recommender_v1.py}"
+SCRIPT="${1:-recommender.py}"
 mkdir -p logs
 LOG=logs/production.log
 
@@ -20,11 +20,11 @@ if [ -z "$PYTHON" ]; then
     for p in /Applications/anaconda3/bin/python3 /opt/anaconda3/bin/python3 "$HOME/anaconda3/bin/python3" \
              /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 /opt/homebrew/bin/python3 \
              /usr/local/bin/python3 /usr/bin/python3; do
-        if [ -x "$p" ] && "$p" -c "import requests" 2>/dev/null; then PYTHON="$p"; break; fi
+        if [ -x "$p" ] && "$p" -c "import requests, numpy" 2>/dev/null; then PYTHON="$p"; break; fi
     done
 fi
 if [ -z "$PYTHON" ]; then
-    echo "No encuentro un python3 con 'requests'. Instálalo:  python3 -m pip install -r starter/requirements.txt"
+    echo "No encuentro un python3 con 'requests' y 'numpy'. Instálalo:  python3 -m pip install -r starter/requirements.txt"
     exit 1
 fi
 echo "Usando $PYTHON"

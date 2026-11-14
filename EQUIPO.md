@@ -8,8 +8,12 @@ Reglas completas del reto en [README.md](README.md) · Leaderboard: https://data
 
 | Fichero | Qué es |
 |---|---|
-| `recommender_v1.py` | **Baseline del equipo**: co-vistas + popularidad por subcategoría/categoría + tendencias de la última hora. Incluye test A/B (`VARIANTS`) |
+| `recommender.py` | **El recomendador en producción.** Dos modelos en test A/B (`VARIANTS`): v1 (reglas) y v2 (pesos aprendidos + historial de cada usuario). `--dry-run` para probar sin enviar |
+| `model.py` | v2: las 16 señales por (usuario, producto) y la memoria de usuarios. Lo usan igual el entrenamiento y producción |
+| `train.py` | Entrena v2 con `shop.history_sessions`, lo evalúa offline contra v1 y el baseline, y guarda `model_weights.json` |
+| `analysis/signal_lift.py` | EDA: qué señales predicen una compra en el carrusel |
 | `monitor.py` | Diagnóstico (solo lee): `check`, `conv`, `latency`, `lag`, `all` |
+| `run_forever.sh` | Lanza producción y la reinicia si se cae |
 | `starter/` | Kit oficial: baseline de los organizadores, `queries.sql`, notebook de evaluación offline |
 
 ## Arrancar
@@ -22,6 +26,8 @@ python monitor.py check         # ¿funciona la conexión?
 ```
 
 Lanzadlo desde la app **Terminal** de macOS (no desde VS Code), con el Mac enchufado y la tapa abierta.
+
+Para probar cambios sin interferir con producción: `python recommender.py --dry-run` (no envía nada).
 
 ⚠️ **Solo un recomendador corriendo a la vez para todo el equipo.** Dos a la vez responden dos veces a la misma
 request y solo cuenta una. Avisad en el grupo antes de parar o lanzar el que está en producción.
