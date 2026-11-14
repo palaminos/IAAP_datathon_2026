@@ -53,8 +53,9 @@ DRY_RUN = "--dry-run" in sys.argv
 # para el mismo comprador). La clave es la etiqueta model_version que muestra `monitor.py conv`.
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
-    "v4-live-weights": 50,  # v3 con los pesos corregidos con nuestro feedback en vivo (train_live.py)
+    "v5-cart-first": 50,    # v3 + los productos que el usuario dejó en el carrito sin comprar, arriba del todo
     "v3-no-rebuy": 50,      # v2 + no recomendar lo que el usuario ya compró
+    # "v4-live-weights": 0, # v3 con pesos corregidos con el feedback en vivo: no ganó a v3 (1,36 % vs 1,61 %)
     # "v2-user-lr": 0,      # iba por detrás de v3 en vivo (14-nov)
     # "v1-coview-trend": 0, # perdió contra v2 en vivo (0,53 % vs 1,13 % de conversión, 14-nov)
 }
@@ -321,13 +322,18 @@ def recommend_v1(req: Record, s: State, coviews: dict[str, list[str]], w: dict =
 
 
 def recommend_v2(req: Record, s: State, users: UserStore, coviews_idx: dict[int, list[int]], weights,
-                 blocked: set[str] = frozenset(), skip_bought: bool = False) -> list[str]:
+                 blocked: set[str] = frozenset(), skip_bought: bool = False, cart_first: bool = False) -> list[str]:
     """v2: puntúa todos los productos (señales × pesos aprendidos) y se queda con los 10 mejores.
 
     skip_bought (v3): descarta lo que el usuario ya compró. En el feedback real del 14-nov, un producto
     ya comprado se volvió a comprar 8 veces menos que el resto (analysis/live_lift.py)."""
     F = model.featurize(req.get("user_id") or "", req.get("recent_views"), s.items, users, coviews_idx)
     score = F @ weights
+    if cart_first:
+        # v5: lo que dejó en el carrito sin comprar va primero (ordenado entre sí por su puntuación). En el
+        # feedback del 14-nov se compra 4-7 veces más que un producto normal en la misma posición, y solo
+        # enseñábamos el 15 % de esos productos (analysis/cart_check.py).
+        score[(F[:, model.FI["p_cart"]] > 0) & (F[:, model.FI["p_buy"]] == 0)] += 1000.0
     if skip_bought:
         score[F[:, model.FI["p_buy"]] > 0] = -np.inf
     return model.top10(score, s.items, blocked)
@@ -457,10 +463,11 @@ def main() -> None:
                     seen[req["request_id"]] = None
                     try:
                         version = pick_variant(req)
-                        if version.startswith(("v2", "v3", "v4")) and weights is not None:
+                        if version.startswith(("v2", "v3", "v4", "v5")) and weights is not None:
                             w = weights_live if version.startswith("v4") and weights_live is not None else weights
                             items = recommend_v2(req, s, bg.users, coviews_idx, w, blocked,
-                                                 skip_bought=not version.startswith("v2"))
+                                                 skip_bought=not version.startswith("v2"),
+                                                 cart_first=version.startswith("v5"))
                         else:
                             version = version if version.startswith("v1") else "v1-coview-trend"
                             items = recommend_v1(req, s, coviews)
