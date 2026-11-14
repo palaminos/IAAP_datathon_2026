@@ -137,6 +137,11 @@ GROUP BY p, q
 ORDER BY n DESC
 LIMIT 20 BY p"""
 
+ALREADY_ANSWERED = """
+SELECT request_id::String AS request_id
+FROM {team}.submissions
+WHERE request_id::String IN (SELECT request_id::String FROM shop.requests ORDER BY ts DESC LIMIT 500)"""
+
 NEW_REQUESTS = """
 SELECT request_id, ts, user_id, is_new_user, context, recent_views
 FROM shop.requests
@@ -265,6 +270,13 @@ def main() -> None:
     print(f"listo: {len(refresher.state.available)} productos disponibles. Esperando requests...")
 
     seen: dict[str, None] = {}  # dict = conjunto que recuerda el orden de llegada
+    # Al (re)arrancar, no volver a responder lo que ya respondió el proceso anterior: sería una
+    # respuesta duplicada y además tardía.
+    try:
+        seen = dict.fromkeys(r["request_id"] for r in query(ALREADY_ANSWERED.format(team=TEAM)))
+        print(f"{len(seen)} requests recientes ya tenían respuesta: no se repiten")
+    except Exception as e:
+        print(f"no se pudo leer lo ya respondido ({e}); sigo igualmente")
     answered = 0
     while True:
         try:
