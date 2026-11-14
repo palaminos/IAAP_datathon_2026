@@ -191,6 +191,14 @@ class Items:
         self.pop = pop
         self.cf = cf_matrix(cf, n) if cf is not None else None
         self.cf_scale = cf["scale"] if cf is not None else 1.0
+        self.cf_new = None   # productos nuevos sin ningún parecido calculado (se lanzaron después del histórico)
+        if self.cf is not None:
+            new = (self.is_new > 0) & (self.cf.getnnz(axis=0) == 0)
+            if new.any() and not new.all():
+                self.cf_new = np.flatnonzero(new)
+                self.cf_old_sub = self.sub[~new]
+                self.cf_old = ~new
+                self.cf_sub_n = np.maximum(np.bincount(self.cf_old_sub, minlength=self.nsub), 1).astype(np.float64)
         # Factores de cada producto para la señal de "usuarios parecidos" (ceros si es nuevo: aún no los tiene)
         self.mfV = None
         if mf is not None:
@@ -201,6 +209,19 @@ class Items:
                 if i is not None:
                     self.mfV[i], self.mf_known[i] = v, True
             self.mf_sub_n = np.bincount(self.sub[self.mf_known], minlength=self.nsub).astype(np.float64)
+
+
+def cf_sum(items: Items, rows: list[int], fill: bool) -> np.ndarray:
+    """Suma, para cada producto, de su parecido con los productos `rows`.
+
+    Con fill=True, a un producto nuevo (sin parecidos calculados: no existía en el histórico) se le supone
+    el parecido medio de los productos de su subcategoría, igual que se hace con mf. Sin esto vale 0 y el
+    modelo lo entierra o hay que compensarlo a ciegas con is_new_prod."""
+    sim = np.asarray(items.cf[rows].sum(0)).ravel()
+    if fill and items.cf_new is not None:
+        sub_sum = np.bincount(items.cf_old_sub, weights=sim[items.cf_old], minlength=items.nsub)
+        sim[items.cf_new] = (sub_sum / items.cf_sub_n)[items.sub[items.cf_new]]
+    return sim
 
 
 class UserStore:
@@ -353,8 +374,8 @@ SELECT u, groupArray(p) AS p, groupArray(v) AS v, groupArray(a) AS a, groupArray
 
 
 def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users: UserStore | None,
-              coviews: dict[int, list[int]]) -> np.ndarray:
-    """Tabla N productos × K señales para una request."""
+              coviews: dict[int, list[int]], cf_fill: bool = False) -> np.ndarray:
+    """Tabla N productos × K señales para una request. cf_fill: ver cf_sum (lo usan las versiones v14+)."""
     n = items.n
     F = np.zeros((n, K), np.float32)
     F[:, STATIC] = items.static
@@ -382,12 +403,12 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
             if items.cf is not None:
                 liked = [i for i, packed in list(mine.items()) if i < n and ((packed >> 20) & MASK or packed >> 40)]
                 if liked:   # suma de parecidos con todo lo que metió en el carrito o compró
-                    sim = np.asarray(items.cf[liked].sum(0)).ravel()
+                    sim = cf_sum(items, liked, cf_fill)
                     F[:, FI["cf"]] = np.log1p(items.cf_scale * sim)
                     F[:, FI["cf_any"]] = sim > 0
                 seen_only = [i for i, packed in list(mine.items()) if i < n and not ((packed >> 20) & MASK or packed >> 40)]
                 if seen_only:
-                    F[:, FI["cf_view"]] = np.log1p(items.cf_scale * np.asarray(items.cf[seen_only].sum(0)).ravel())
+                    F[:, FI["cf_view"]] = np.log1p(items.cf_scale * cf_sum(items, seen_only, cf_fill))
         if users.mf is not None and items.mfV is not None and row < len(users.mf):
             vec = users.mf[row]
             known = items.mf_known
@@ -414,7 +435,7 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
         F[:, 10] = items.cat == items.cat[last]
         F[:, 11] = np.bincount(items.sub[idx], minlength=items.nsub)[items.sub] / len(idx)
         if items.cf is not None:
-            sim = np.asarray(items.cf[sorted(set(idx))].sum(0)).ravel()
+            sim = cf_sum(items, sorted(set(idx)), cf_fill)
             F[:, FI["cf_sess"]] = np.log1p(items.cf_scale * sim)
             F[:, FI["cf_sess_any"]] = sim > 0
         for k, p in enumerate(reversed(idx[-10:])):  # la vista más reciente pesa más
@@ -437,6 +458,11 @@ def index_coviews(coviews: dict[str, list[str]]) -> dict[int, list[int]]:
 def load_weights(path: Path = WEIGHTS_FILE) -> np.ndarray:
     saved: dict[str, Any] = json.loads(path.read_text())["weights"]
     return np.array([saved.get(name, 0.0) for name in FEATURES], np.float32)
+
+
+def load_options(path: Path) -> dict:
+    """Opciones con las que se entrenó un fichero de pesos (p. ej. {"cf_fill": true}). Vacío si no tiene."""
+    return json.loads(path.read_text()).get("options", {})
 
 
 def top10(score: np.ndarray, items: Items, blocked: set[str] = frozenset()) -> list[str]:

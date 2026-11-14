@@ -66,14 +66,16 @@ DRY_RUN = "--dry-run" in sys.argv
 VARIANTS: dict[str, int] = {
     # Noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12: esta noche el tráfico se
     # reparte para APRENDER qué versión es la mejor.
-    "v8-new-products": 32,  # CAMPEONA desde las 21:15 (decisión de tarre): v6 reentrenado + señal de producto nuevo
-    "v12-cf": 19,           # v8 + parecido con lo que el comprador metió en el carrito o compró
-    "v13-cf-session": 19,   # v12 + parecido con lo que acaba de ver en la sesión y con lo que vio otros días
-    "v9-organic": 18,       # segunda oportunidad (la pidió tarre): perdió con solo 1.300 requests (z = -2,0)
-    "v6-similar-users": 12, # campeona anterior, como control: v8 le saca +0,16 puntos pero con z = +1,3 (no demostrado)
+    "v8-new-products": 28,  # CAMPEONA desde las 21:05 (decisión de tarre): v6 reentrenado + señal de producto nuevo
+    "v12-cf": 20,           # v8 + parecido con lo que el comprador metió en el carrito o compró
+    "v13-cf-session": 20,   # v12 + parecido con lo que acaba de ver en la sesión y con lo que vio otros días
+    "v14-cf-split": 20,     # v13 + pesos distintos para compradores nuevos y conocidos + parecido estimado para productos nuevos
+    "v6-similar-users": 12, # campeona anterior, como control de v8 (de momento empatadas)
     # Retiradas (conversión esperada del leaderboard, misma ventana):
-    #   v10-sale        v6 + empujón de 0,8 a los rebajados: +0,07 (z = +0,5) casi todo fuera de rebajas; con los
-    #                   datos de hoy el peso aprendido de "rebajado" sale -0,15 -> el empujón no tiene base
+    #   v9-organic      segunda oportunidad (20:35-21:15): 1,59 % frente a 1,96 % de v6 (z = -2,2). La primera vez,
+    #                   1,30 % frente a 1,53 % (z = -2,0). Dos veces por debajo -> no usar
+    #   v10-sale        v6 + empujón de 0,8 a los rebajados: con los datos de hoy el peso aprendido de "rebajado"
+    #                   sale -0,15 -> el empujón no tiene base
     #   v5-cart-first   1,24 % frente a 1,53 % de v4 (z = -3,0)  -> no usar
     #   v4-live-weights 1,53 % frente a 1,66 % de v6 (z = -2,5)
     #   v7-explore / v7b-explore-v6: sorteos para aprender; bajan la conversión. Solo si se decide a propósito
@@ -376,12 +378,13 @@ def recommend_v1(req: Record, s: State, coviews: dict[str, list[str]], w: dict =
 
 
 def recommend_v2(req: Record, s: State, users: UserStore, coviews_idx: dict[int, list[int]], weights,
-                 blocked: set[str] = frozenset(), skip_bought: bool = False, cart_first: bool = False) -> list[str]:
+                 blocked: set[str] = frozenset(), skip_bought: bool = False, cart_first: bool = False,
+                 cf_fill: bool = False) -> list[str]:
     """v2: puntúa todos los productos (señales × pesos aprendidos) y se queda con los 10 mejores.
 
     skip_bought (v3): descarta lo que el usuario ya compró. En el feedback real del 14-nov, un producto
     ya comprado se volvió a comprar 8 veces menos que el resto (analysis/live_lift.py)."""
-    F = model.featurize(req.get("user_id") or "", req.get("recent_views"), s.items, users, coviews_idx)
+    F = model.featurize(req.get("user_id") or "", req.get("recent_views"), s.items, users, coviews_idx, cf_fill)
     if weights[model.FI["organic"]] != 0:   # solo las versiones que usan la señal orgánica pagan sus ~6 ms
         model.add_organic(F)
     score = F @ weights
@@ -552,6 +555,7 @@ class Models:
     weights: Any = None        # model_weights.json (histórico)
     weights_live: Any = None   # model_weights_live.json (corregidos con el feedback en vivo)
     by_version: dict = field(default_factory=dict)   # "v6", "v7"... -> pesos de model_weights_v6.json, _v7.json...
+    options: dict = field(default_factory=dict)      # "v14" -> opciones con las que se entrenó (p. ej. cf_fill)
     explore_q: Any = None      # cola de registros de exploración pendientes de enviar a scratch
 
 
@@ -564,6 +568,7 @@ def load_models() -> Models:
     # Versiones posteriores (v6, v7...): cada una con su fichero de pesos model_weights_<versión>.json
     for f in sorted(model.WEIGHTS_FILE.parent.glob("model_weights_v*.json")):
         m.by_version[f.stem.removeprefix("model_weights_")] = model.load_weights(f)
+        m.options[f.stem.removeprefix("model_weights_")] = model.load_options(f)
     m.explore_q = queue.Queue(maxsize=20_000)
     for v in VARIANTS:
         prefix = EXPLORE.get(v, v.split("-")[0])
@@ -600,8 +605,12 @@ def respond(req: Record, version: str, s: State, blocked: set[str], users: UserS
                 if prefix not in m.by_version:
                     raise RuntimeError(f"faltan los pesos de {prefix}")
                 w = m.by_version[prefix]
+                # Pesos propios para compradores nuevos, si la versión los trae (model_weights_<versión>n.json)
+                if prefix + "n" in m.by_version and str(req.get("is_new_user")).lower() in ("true", "1"):
+                    w = m.by_version[prefix + "n"]
             items = recommend_v2(req, s, users, m.coviews_idx, w, blocked,
-                                 skip_bought=prefix != "v2", cart_first=prefix == "v5")
+                                 skip_bought=prefix != "v2", cart_first=prefix == "v5",
+                                 cf_fill=bool(m.options.get(prefix, {}).get("cf_fill")))
         else:
             version = version if prefix == "v1" else "v1-coview-trend"
             items = recommend_v1(req, s, m.coviews)

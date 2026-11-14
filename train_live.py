@@ -22,6 +22,7 @@ import datetime as dt
 import json
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
@@ -65,10 +66,15 @@ WHERE ts::DateTime64(3) >= toDateTime64('{a}', 3) AND ts::DateTime64(3) < toDate
 ORDER BY ts"""
 
 
+CF_FILL = "--cf-fill" in sys.argv   # a los productos nuevos se les supone el parecido medio de su subcategoría
+SEGMENT = _arg("--segment")         # "new" o "known": entrena solo con compradores nuevos o solo con conocidos
+
+
 def live_examples():
     """Una fila por producto mostrado hoy, con las señales tal como eran en el momento de la request."""
     mf = model.load_mf()
-    state = rec.build_state(rec.hist_popularity(), mf, model.load_cf())
+    # --cf-file cache/cf_sim_live.npz : otra tabla de parecidos (p. ej. histórico + eventos de hoy hasta una hora)
+    state = rec.build_state(rec.hist_popularity(), mf, model.load_cf(Path(_arg("--cf-file"))) if _arg("--cf-file") else model.load_cf())
     items = state.items
     users = model.UserStore()
     users.load_file(rec.CACHE / "users_history_v2.pkl")
@@ -113,7 +119,7 @@ def live_examples():
             events, e = rec.query(EVENTS.format(a=hour, b=hour + dt.timedelta(hours=1)), timeout=300), 0
             hour += dt.timedelta(hours=1)
         idx = [model.PRODUCTS.idx[p] for p in r["shown"]]
-        rows = model.add_organic(model.featurize(r["u"], [{"product_id": p} for p in r["rv"]], items, users, cov_idx)[idx])
+        rows = model.add_organic(model.featurize(r["u"], [{"product_id": p} for p in r["rv"]], items, users, cov_idx, CF_FILL)[idx])
         rows[:, model.FI["on_sale"]] = [on_sale(p, int(r["ms"])) for p in r["shown"]]
         X.append(rows)
         slot.append(np.arange(10)), when.append(np.full(10, int(r["ms"])))
@@ -156,6 +162,15 @@ def fit_corrected(current, L, mask, C):
     return (base + lr.coef_[0][1:model.K + 1] / sd).astype(np.float32), base
 
 
+def fit_plain(current, L, mask, C):
+    """Pesos aprendidos SOLO con los datos de hoy (sin partir del histórico). Se usa con --no-base, p. ej. para
+    compradores nuevos: el histórico describe a compradores con historial y a ellos les estorba."""
+    X = L["X"][mask]
+    mu, sd = X.mean(0), X.std(0) + 1e-9
+    lr = LogisticRegression(C=C, max_iter=5000, tol=1e-6).fit(np.hstack([(X - mu) / sd, onehot(L["slot"][mask])]), L["buy"][mask])
+    return (lr.coef_[0][:model.K] / sd).astype(np.float32), np.zeros(model.K, np.float32)
+
+
 def judge(w, L, fit_rows, test_rows, target):
     """Puntuación del producto + posición -> probabilidad. Se calibra en fit_rows y se mide en test_rows."""
     Z = np.hstack([(L["X"] @ w)[:, None], onehot(L["slot"])])
@@ -170,9 +185,16 @@ def main() -> None:
         global EXPLORED_ROWS
         d = np.load(rec.CACHE / "live_matrix.npz")
         assert list(d["features"]) == model.FEATURES, "la tabla guardada tiene otras señales: repite analysis/live_matrix.py"
+        assert bool(d["cf_fill"]) == CF_FILL, "la tabla guardada se hizo con otro valor de --cf-fill"
         X, slot, click, buy, when, EXPLORED_ROWS = d["X"].copy(), d["slot"], d["click"], d["buy"], d["when"], d["explored"]
+        is_new = d["new"].astype(bool)
     else:
         X, slot, click, buy, when = live_examples()
+        is_new = META["new"].astype(bool)
+    if SEGMENT:
+        keep = is_new if SEGMENT == "new" else ~is_new
+        X, slot, click, buy, when, EXPLORED_ROWS = X[keep], slot[keep], click[keep], buy[keep], when[keep], EXPLORED_ROWS[keep]
+        print(f"segmento: compradores {'NUEVOS' if SEGMENT == 'new' else 'CONOCIDOS'}")
     if not V6:  # la versión v4 solo usa las 16 señales originales
         X[:, model.FI["mf"]:] = 0
     X[:, DROP] = 0
@@ -184,16 +206,17 @@ def main() -> None:
     # --base hist13 : parte de model_weights_hist13.json en vez de model_weights.json
     current = model.load_weights(model.WEIGHTS_FILE.with_name(f"model_weights_{_arg('--base')}.json")) if _arg("--base") else model.load_weights()
     # 1) elegir la fuerza de la regularización con la parte de validación
+    fit_w = fit_plain if "--no-base" in sys.argv else fit_corrected
     best_C, best = None, 9.0
-    for C in (0.001, 0.003, 0.01, 0.1, 1.0, 10.0):
-        w, _ = fit_corrected(current, L, tr, C)
+    for C in ((0.01, 0.03, 0.1, 0.3, 1.0, 3.0) if "--no-base" in sys.argv else (0.001, 0.003, 0.01, 0.1, 1.0, 10.0)):
+        w, _ = fit_w(current, L, tr, C)
         ll, auc = judge(w, L, tr, va, "buy")
         print(f"  validación C={C:<7} log-loss compra {ll:.5f}  AUC {auc:.4f}")
         if ll < best:
             best_C, best = C, ll
     # 2) medir una vez en la parte de prueba, entrenando con entrenar+validar
     cands = {"pesos actuales (solo histórico)": current,
-             f"corregidos con hoy (C={best_C})": fit_corrected(current, L, tr | va, best_C)[0]}
+             f"corregidos con hoy (C={best_C})": fit_w(current, L, tr | va, best_C)[0]}
     lr = LogisticRegression(C=1.0, max_iter=3000).fit(np.hstack([(X[tr | va] - X.mean(0)) / (X.std(0) + 1e-9), onehot(slot[tr | va])]), buy[tr | va])
     cands["solo con datos de hoy"] = (lr.coef_[0][:model.K] / (X.std(0) + 1e-9)).astype(np.float32)
     v4_file = model.WEIGHTS_FILE.with_name("model_weights_live.json")
@@ -225,7 +248,7 @@ def main() -> None:
               + "  ".join(f"{k + 1}:{np.exp(v):.2f}" for k, v in enumerate(np.concatenate([[0.0], lr.coef_[0][1:]]))))
 
     # 3) pesos finales: histórico + corrección con TODO el feedback de hoy
-    final, base = fit_corrected(current, L, np.ones(len(X), bool), best_C)
+    final, base = fit_w(current, L, np.ones(len(X), bool), best_C)
     for name, cap in CAPS.items():
         if final[model.FI[name]] > cap:
             print(f"tope: {name} {final[model.FI[name]]:.3f} -> {cap}")
@@ -239,6 +262,7 @@ def main() -> None:
     print(f"\n¿Mejoran a los actuales en la prueba (compra y clic)? {'SÍ' if better else 'NO'}")
     if (better or V6) and "--no-save" not in sys.argv:
         OUT.write_text(json.dumps({"trained": dt.datetime.now().isoformat(timespec="seconds"), "C": best_C, "caps": CAPS,
+                                   "options": {"cf_fill": CF_FILL}, "segment": SEGMENT or "all", "base": "ninguna" if "--no-base" in sys.argv else (_arg("--base") or "histórico"),
                                    "live_responses": len(X) // 10, "live_purchases": int(buy.sum()), "test": res,
                                    "weights": {n: round(float(v), 5) for n, v in zip(model.FEATURES, final)}}, indent=2, ensure_ascii=False))
         print(f"guardado {OUT.name}")
