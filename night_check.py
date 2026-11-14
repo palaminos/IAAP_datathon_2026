@@ -101,6 +101,9 @@ try:
     say("```")
     for line in lines[1:] + stratified(state["periods"], state["champion"]):
         say(line)
+    if state.get("control"):
+        for line in stratified(state["periods"], state["champion"], control=state["control"]):
+            say(line)
     say("```")
 except Exception as e:
     say(f"- leaderboard no disponible: {e!r}")

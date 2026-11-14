@@ -66,16 +66,16 @@ DRY_RUN = "--dry-run" in sys.argv
 VARIANTS: dict[str, int] = {
     # Noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12: esta noche el tráfico se
     # reparte para APRENDER qué versión es la mejor.
-    "v8-new-products": 28,  # CAMPEONA desde las 21:05 (decisión de tarre): v6 reentrenado + señal de producto nuevo
-    "v12-cf": 20,           # v8 + parecido con lo que el comprador metió en el carrito o compró
-    "v13-cf-session": 20,   # v12 + parecido con lo que acaba de ver en la sesión y con lo que vio otros días
-    "v14-cf-split": 20,     # v13 + pesos distintos para compradores nuevos y conocidos + parecido estimado para productos nuevos
-    "v6-similar-users": 12, # campeona anterior, como control de v8 (de momento empatadas)
-    # Retiradas (conversión esperada del leaderboard, misma ventana):
-    #   v9-organic      segunda oportunidad (20:35-21:15): 1,59 % frente a 1,96 % de v6 (z = -2,2). La primera vez,
-    #                   1,30 % frente a 1,53 % (z = -2,0). Dos veces por debajo -> no usar
-    #   v10-sale        v6 + empujón de 0,8 a los rebajados: con los datos de hoy el peso aprendido de "rebajado"
-    #                   sale -0,15 -> el empujón no tiene base
+    "v8-new-products": 30,  # campeona por decisión de tarre (21:05) y control: v6 reentrenado + señal de producto nuevo
+    "v14-cf-split": 19,     # v13 + pesos distintos para compradores nuevos y conocidos. Primera media hora: +0,30 (z = +2,0)
+    "v17-ease": 19,         # v14 con otra tabla de parecidos (EASE, train_ease.py): en el histórico separa mejor
+    "v18-live": 19,         # v14 + señales de lo que el comprador ha visto o metido en el carrito durante el evento
+    "v12-cf": 13,           # v8 + parecido con lo que el comprador metió en el carrito o compró: +0,20 (z = +1,9)
+    # Retiradas (conversión esperada del leaderboard, por tramos):
+    #   v13-cf-session  +0,18 (z = +1,5) con 1.552 requests: no es peor, pero v14 la incluye y hace falta el hueco
+    #   v6-similar-users empatada con v8 (-0,01, z = -0,1, 4.918 requests): ya no hace falta como control
+    #   v9-organic      dos veces por debajo (z = -2,0 y z = -2,2)  -> no usar
+    #   v10-sale        el peso aprendido de "rebajado" es -0,15: el empujón no tiene base
     #   v5-cart-first   1,24 % frente a 1,53 % de v4 (z = -3,0)  -> no usar
     #   v4-live-weights 1,53 % frente a 1,66 % de v6 (z = -2,5)
     #   v7-explore / v7b-explore-v6: sorteos para aprender; bajan la conversión. Solo si se decide a propósito
@@ -500,7 +500,7 @@ class Background:
         self.users.init_mf(self.mf)
         try:
             wm = query("SELECT toString(max(ts::DateTime64(3))) AS wm FROM shop.events")[0]["wm"]
-            self.users.load(query, "shop.events", cond=f"AND e.ts::DateTime64(3) <= '{wm}'", mfV=self.state.items.mfV)
+            self.users.load(query, "shop.events", cond=f"AND e.ts::DateTime64(3) <= '{wm}'", mfV=self.state.items.mfV, live=True)
             self.users.watermark = wm
         except Exception as e:
             print(f"eventos en vivo no disponibles todavía: {e}")

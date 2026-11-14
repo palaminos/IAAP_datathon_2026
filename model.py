@@ -55,6 +55,10 @@ FEATURES = [
     "cf_sess",         # el mismo parecido, pero con los productos que acaba de ver en esta sesión (recent_views)
     "cf_sess_any",     # 1 si se parece a algo de la sesión
     "cf_view",         # el mismo parecido, con lo que vio otros días sin llegar a meterlo en el carrito
+    # --- añadidas en v18 ---
+    "cart_live",       # 1 si lo metió en el carrito DURANTE el evento (shop.events) y aún no lo ha comprado: se
+                       # compra el doble que lo que solo estaba en el carrito en el histórico (1,1 % frente a 0,5 %)
+    "view_live",       # log(1 + veces que lo ha visto durante el evento)
 ]
 K = len(FEATURES)
 FI = {name: i for i, name in enumerate(FEATURES)}
@@ -259,6 +263,7 @@ class UserStore:
         self.sub = np.zeros((capacity, cols), np.uint16)
         self.brand = np.zeros((capacity, cols), np.uint16)
         self.prod: dict[int, dict[int, int]] = {}   # fila de usuario -> {producto: contadores empaquetados}
+        self.live: dict[int, dict[int, int]] = {}   # lo mismo, pero solo con lo ocurrido durante el evento (shop.events)
         self.watermark = ""                          # último ts de shop.events ya incorporado
         self.mf: np.ndarray | None = None            # factores de "usuarios parecidos" por usuario
 
@@ -306,14 +311,17 @@ class UserStore:
         shift = 0 if etype == "view" else 20 if etype == "add_to_cart" else 40
         if i in d or shift or len(d) < 80:  # tope por usuario para no gastar memoria en vistas sueltas
             d[i] = d.get(i, 0) + (1 << shift)
+            lv = self.live.setdefault(r, {})
+            lv[i] = lv.get(i, 0) + (1 << shift)
         if self.mf is not None and items.mfV is not None:  # lo de hoy también mueve sus "gustos"
             self.mf[r] += EVENT_MF.get(etype, 0.0) * items.mfV[i]
 
     # ------------------------------------------------------------------ carga desde RawTree
     def load(self, query: Callable[..., list[dict]], table: str, cond: str = "", chunks: int = 8,
-             mfV: np.ndarray | None = None) -> None:
+             mfV: np.ndarray | None = None, live: bool = False) -> None:
         """Agrega en RawTree (SQL) la actividad por usuario y la suma a la memoria.
-        Con mfV (eventos de hoy), además actualiza los factores de "usuarios parecidos"."""
+        Con mfV (eventos de hoy), además actualiza los factores de "usuarios parecidos".
+        live=True (al cargar shop.events): además lo apunta como actividad del evento (self.live)."""
         self.ensure_cols()
         jobs = [(kind, i) for kind in ("sub", "brand", "prod") for i in range(chunks)]
 
@@ -333,6 +341,9 @@ class UserStore:
                             i = PRODUCTS.idx.get(p)
                             if i is not None:
                                 d[i] = d.get(i, 0) + int(v) + (int(a) << 20) + (int(b) << 40)
+                                if live:
+                                    lv = self.live.setdefault(r, {})
+                                    lv[i] = lv.get(i, 0) + int(v) + (int(a) << 20) + (int(b) << 40)
                                 if mfV is not None and self.mf is not None and i < len(mfV):
                                     self.mf[r] += math.log1p(int(v) + 3 * int(a) + 5 * int(b)) * mfV[i]
                     else:
@@ -438,6 +449,13 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
                 seen_only = [i for i, packed in list(mine.items()) if i < n and not ((packed >> 20) & MASK or packed >> 40)]
                 if seen_only:
                     F[:, FI["cf_view"]] = np.log1p(t.scale * cf_sum(items, t, seen_only, cf_fill))
+        lv = users.live.get(row)
+        if lv:
+            for i, packed in list(lv.items()):
+                if i < n:
+                    if (packed >> 20) & MASK and not F[i, 6]:      # en el carrito durante el evento y sin comprar
+                        F[i, FI["cart_live"]] = 1.0
+                    F[i, FI["view_live"]] = math.log1p(packed & MASK)
         if users.mf is not None and items.mfV is not None and row < len(users.mf):
             vec = users.mf[row]
             known = items.mf_known
