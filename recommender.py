@@ -54,8 +54,10 @@ DRY_RUN = "--dry-run" in sys.argv
 # para el mismo comprador). La clave es la etiqueta model_version que muestra `monitor.py conv`.
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
-    "v5-cart-first": 50,    # v4 + los productos que el usuario dejó en el carrito sin comprar, arriba del todo
-    "v4-live-weights": 50,  # v3 con los pesos corregidos con nuestro feedback en vivo (train_live.py)
+    "v4-live-weights": 100, # v3 con los pesos corregidos con nuestro feedback en vivo (train_live.py)
+    # "v5-cart-first": 0,   # v4 + carritos abandonados arriba del todo: PERDIÓ contra v4 en vivo
+    #                         (1,29 % vs 2,26 % de conversión, -38 % de clics, 14-nov). Forzar todos los
+    #                         carritos desplaza productos mejores; v4 ya sube los que merecen la pena.
     # "v3-no-rebuy": 0,     # v2 + no recomendar lo ya comprado. Empate con v4 en vivo (1,43 % vs 1,57 %, 14-nov)
     # "v2-user-lr": 0,      # iba por detrás de v3 en vivo (14-nov)
     # "v1-coview-trend": 0, # perdió contra v2 en vivo (0,53 % vs 1,13 % de conversión, 14-nov)
