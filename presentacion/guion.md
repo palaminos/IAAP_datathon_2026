@@ -4,9 +4,9 @@ _Generado con los números actuales. 9 diapositivas, unos 6 minutos. En **negrit
 
 ## 1. team_23 · Un recomendador que aprende mientras atiende
 
-- **Capturamos el 49 % de la mejora máxima posible (0 = los más vendidos, 100 = la lista perfecta).**
+- **Capturamos el 51 % de la mejora máxima posible (0 = los más vendidos, 100 = la lista perfecta).**
 - **Respondemos en 1 segundo de mediana, con el límite en 3.**
-- **De la versión del sábado a la final: +0,79 puntos de conversión (±0,48), medidos en vivo.**
+- **De la versión del sábado a la final: +0,83 puntos de conversión (±0,49), medidos en vivo.**
 
 _Somos cuatro y empezamos de cero el sábado por la mañana. Nuestra idea ha sido sencilla: un modelo que se pueda explicar, y que cada cambio se gane su sitio con datos en vivo y con su margen de error._
 
@@ -23,13 +23,16 @@ _La fiabilidad va primero: si no respondes a tiempo, da igual lo bueno que sea e
 
 ## 3. El modelo, en ideas que se pueden leer
 
+![](6_historial.png)
+
 - **Lo que el comprador ya hizo: su carrito sube; lo que ya compró, fuera (en vivo no se recompra).**
 - **Lo que acaba de ver en esta sesión.**
 - **Parecido entre productos: "quien metió X en el carrito o lo compró, también Y".**
 - **Lo bueno que es el producto: carritos por cada visita, no ventas totales.**
+- **Lo que cada comprador hizo en el sistema antiguo: si compró un producto desde un carrusel, lo compra 13 veces más que uno que nunca vio.**
 - **Pesos distintos para compradores nuevos y conocidos.**
 
-_Es una suma de señales con pesos. Lo elegimos así a propósito: se entrena en segundos, responde en un milisegundo y cuando algo va mal podemos mirar qué peso lo causa. A los compradores nuevos les mueve lo que convence a todos; a los conocidos, su carrito y su historial._
+_Es una suma de señales con pesos. Lo elegimos así a propósito: se entrena en segundos, responde en un milisegundo y cuando algo va mal podemos mirar qué peso lo causa. A los compradores nuevos les mueve lo que convence a todos; a los conocidos, su carrito y su historial. La última señal salió de una tabla que casi nadie mira: los carruseles del sistema antiguo guardan qué enseñó, qué se clicó y qué se compró, comprador a comprador._
 
 ## 4. Aprender del stream: reentrenar con nuestras propias respuestas
 
@@ -38,9 +41,9 @@ _Es una suma de señales con pesos. Lo elegimos así a propósito: se entrena en
 - **Cada minuto: eventos nuevos a la memoria de cada comprador, tasas de cada producto y productos nuevos.**
 - **Cada pocas horas: los pesos se reajustan con lo que de verdad se compró en nuestras listas.**
 - **Cada versión nueva entra con parte del tráfico y compite con la campeona.**
-- **Tres pasos, +0,79 puntos en total (±0,48). Dos son claros por sí solos; el otro queda dentro del margen.**
+- **Cuatro pasos, +0,83 puntos en total (±0,49). Dos son claros por sí solos; los otros quedan dentro del margen.**
 
-_El histórico no se comporta igual que el vivo, así que sus pesos solo son el punto de partida. Para reentrenar reproducimos el día en orden, cada request con lo que se sabía en ese momento, para no hacer trampa. Lo que más nos ha dado es aprender de las listas que nosotros mismos enseñamos._
+_El histórico no se comporta igual que el vivo, así que sus pesos solo son el punto de partida. Para reentrenar reproducimos el día en orden, cada request con lo que se sabía en ese momento, para no hacer trampa. Lo que más nos ha dado es aprender de las listas que nosotros mismos enseñamos. El último paso parece pequeño porque solo cambia las listas de los compradores conocidos; con ellos la mejora es clara: +0,14 puntos en casi cuatro horas de prueba, la más larga de la noche._
 
 ## 5. Decidir con datos: antes de medir, medir la regla
 
@@ -78,10 +81,10 @@ _Todo el cálculo pesado lo hace RawTree con SQL; en el portátil solo queda mul
 
 ![](7_segmentos.png)
 
-- **De 38 % de la mejora posible a las 18:00 a 49 % de madrugada.**
-- **Puesto 10 de 42. Los 7 equipos de delante nos sacan unas décimas en los dos frentes: cold 2,28 % frente a 2,51 %; conocidos 1,52 % frente a 1,75 %.**
-- **A la referencia de los organizadores la ganamos en cold (2,28 % frente a 1,63 %) y perdemos con conocidos (1,52 % frente a 2,06 %).**
-- **Versión final: v24-rate.**
+- **De 38 % de la mejora posible a las 18:00 a 51 % de madrugada.**
+- **Puesto 12 de 42. Los 9 equipos de delante nos sacan unas décimas en los dos frentes: cold 2,35 % frente a 2,62 %; conocidos 1,51 % frente a 1,74 %.**
+- **A la referencia de los organizadores la ganamos en cold (2,35 % frente a 1,69 %) y perdemos con conocidos (1,51 % frente a 2,00 %).**
+- **Versión final: v33-user-history.**
 
 _Cada décima que tenemos está medida frente a la versión anterior, con su margen, y sabemos de dónde viene. También sabemos lo que no sabemos: probamos una docena de señales más esta madrugada y ninguna movió la aguja, así que lo que les falta a nuestras listas no está en las señales que tenemos._
 

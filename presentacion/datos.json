@@ -20,7 +20,9 @@
    "03:00",
    "04:00",
    "05:00",
-   "06:00"
+   "06:00",
+   "07:00",
+   "08:00"
   ],
   "nosotros": [
    0.0,
@@ -42,7 +44,9 @@
    49.4126,
    49.4458,
    49.4943,
-   51.5159
+   50.7507,
+   51.2278,
+   51.5757
   ],
   "lider": "team_06"
  },
@@ -70,12 +74,20 @@
    "error": 0.135,
    "requests": 4456,
    "clara": true
+  },
+  {
+   "de": "v24-rate",
+   "a": "v33-user-history",
+   "ganancia": 0.046,
+   "error": 0.057,
+   "requests": 21421,
+   "clara": false
   }
  ],
  "mejora_total": {
-  "ganancia": 0.786,
-  "error": 0.239,
-  "z": 3.3
+  "ganancia": 0.831,
+  "error": 0.246,
+  "z": 3.4
  },
  "ruido": {
   "total": 5.9,
@@ -132,8 +144,8 @@
    "p99": 2.79
   },
   "despues": {
-   "p50": 1.02,
-   "p99": 2.23
+   "p50": 1.01,
+   "p99": 2.14
   }
  },
  "historial": [
@@ -169,33 +181,33 @@
   }
  ],
  "segmentos": {
-  "cuota_cold": 0.425,
+  "cuota_cold": 0.431,
   "nosotros": {
-   "conv": 1.84,
-   "cold": 2.28,
-   "conocidos": 1.52
+   "conv": 1.87,
+   "cold": 2.35,
+   "conocidos": 1.51
   },
   "referencia": {
-   "conv": 1.88,
-   "cold": 1.63,
-   "conocidos": 2.06
+   "conv": 1.87,
+   "cold": 1.69,
+   "conocidos": 2.0
   },
   "mejor": {
    "equipo": "team_06",
-   "conv": 2.22,
-   "cold": 2.72,
-   "conocidos": 1.85
+   "conv": 2.19,
+   "cold": 2.73,
+   "conocidos": 1.79
   },
   "delante": {
-   "n": 7,
+   "n": 9,
    "cold": [
-    2.51
+    2.62
    ],
    "conocidos": [
-    1.75
+    1.74
    ]
   },
-  "puesto": 10,
+  "puesto": 12,
   "equipos": 42
  }
 }

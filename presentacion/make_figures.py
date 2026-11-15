@@ -97,14 +97,15 @@ ax.bar(xs, [v[0] for v in vals], width=0.11, color=[BLUE if c else GRAY for c in
 ax.yaxis.set_major_formatter(COMMA)
 for i, (dv, se, n) in enumerate(vals):
     ax.plot([i, i], [dv - 2 * se, dv + 2 * se], color=INK2, lw=1.2, zorder=3)
-    ax.annotate(f"+{es(dv)}" if dv >= 0 else es(dv).replace("-", "−"), (i, dv), xytext=(14, -2), textcoords="offset points", fontsize=13, fontweight="bold", color=INK, va="center")
-    ax.annotate(("clara" if clear[i] else "dentro del margen") + f" · ±{es(2 * se)}", (i, dv), xytext=(14, -19), textcoords="offset points", fontsize=9.5, color=INK2, va="center")
-    ax.annotate(f"{n:,}".replace(",", ".") + " requests", (i, dv), xytext=(14, -33), textcoords="offset points", fontsize=9, color=MUTED, va="center")
+    up = 30 if dv < 0.15 else 0       # una barra muy baja lleva su etiqueta por encima, para no pisar el eje
+    ax.annotate(f"+{es(dv)}" if dv >= 0 else es(dv).replace("-", "−"), (i, dv), xytext=(14, -2 + up), textcoords="offset points", fontsize=13, fontweight="bold", color=INK, va="center")
+    ax.annotate("clara" if clear[i] else "dentro del margen", (i, dv), xytext=(14, -19 + up), textcoords="offset points", fontsize=9.5, color=INK2, va="center")
+    ax.annotate(f"±{es(2 * se)} · " + f"{n:,}".replace(",", ".") + " req.", (i, dv), xytext=(14, -33 + up), textcoords="offset points", fontsize=9, color=MUTED, va="center")
 ax.axhline(0, color=AXIS, lw=1)
 ax.set_xticks(xs); ax.set_xticklabels([s[2] for s in steps], fontsize=10.5, color=INK2)
 lo = min(0.0, min(v[0] - 2 * v[1] for v in vals))
 ax.set_xlim(-0.6, len(steps) - 0.4); ax.set_ylim(lo * 1.15, max(v[0] + 2 * v[1] for v in vals) * 1.15); ax.set_ylabel("puntos de conversión")
-ax.set_xlim(-0.6, len(steps) - 0.25)
+ax.set_xlim(-0.55, len(steps) - 0.2)
 f.subplots_adjust(bottom=0.24)
 f.savefig(OUT / "2_mejoras.png"); plt.close(f)
 datos["mejoras"] = [{"de": a, "a": b, "ganancia": round(v[0], 3), "error": round(v[1], 3), "requests": v[2], "clara": bool(c)} for (a, b, _), v, c in zip(steps, vals, clear)]

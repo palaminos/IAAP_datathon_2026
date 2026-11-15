@@ -24,6 +24,7 @@ ruido = d.get("ruido", {"total": 5.9})
 hist = {x["grupo"]: x["tasa_pct"] for x in d.get("historial", [])}
 h_buy, h_never = hist.get("lo compró desde un carrusel antiguo"), hist.get("nunca se lo habían enseñado")
 uses_history = champ.startswith("v33")
+fr = st.get("final_round")
 seg = d.get("segmentos")
 if seg and seg.get("delante", {}).get("n"):
     gap_txt = (f"Puesto {seg['puesto']} de {seg['equipos']}. Los {seg['delante']['n']} equipos de delante nos sacan unas décimas en los dos frentes: "
@@ -68,7 +69,8 @@ slides = [
               "Cada pocas horas: los pesos se reajustan con lo que de verdad se compró en nuestras listas.",
               "Cada versión nueva entra con parte del tráfico y compite con la campeona.",
               steps_txt],
-  "say": "El histórico no se comporta igual que el vivo, así que sus pesos solo son el punto de partida. Para reentrenar reproducimos el día en orden, cada request con lo que se sabía en ese momento, para no hacer trampa. Lo que más nos ha dado es aprender de las listas que nosotros mismos enseñamos."},
+  "say": "El histórico no se comporta igual que el vivo, así que sus pesos solo son el punto de partida. Para reentrenar reproducimos el día en orden, cada request con lo que se sabía en ese momento, para no hacer trampa. Lo que más nos ha dado es aprender de las listas que nosotros mismos enseñamos."
+         + (f" El último paso parece pequeño porque solo cambia las listas de los compradores conocidos; con ellos la mejora es clara: +{es(fr['conocidos'])} puntos en casi cuatro horas de prueba, la más larga de la noche." if uses_history and fr else "")},
  {"title": "Decidir con datos: antes de medir, medir la regla",
   "figure": "3_productos_nuevos.png",
   "bullets": ["Comparamos versiones con la conversión esperada del leaderboard: mucho menos ruido que contar compras.",

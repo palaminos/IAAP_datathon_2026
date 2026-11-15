@@ -75,7 +75,8 @@ Diario: `logs/night_report.md`. Estado: `logs/night_state.json` (campeona, retad
 | 02:35-03:04 | v24 25 · v26 25 · v27 25 · v28-rate-learned 25 (curva de productos nuevos: 7 % · 13 % · 21 % · 32 %) | f9a0f69 |
 | 03:05-03:47 | v24 34 (CAMPEONA) · v29-rate-retrain 33 · v31-rate-known 33 | 3433ddb |
 | 03:50-04:30 | v24 50 · v32-carousel-hist 50 (conocidos +0,02; el -0,5 en cold era ruido: listas de nuevos casi iguales) | 6016e23 |
-| 04:35- | v24 50 · **v33-user-history** 50 (v32 + sesiones antiguas; para compradores nuevos, los pesos de v24). Ronda larga, hasta las 08:20 | 8bc9187 |
+| 04:35-08:22 | v24 50 · v33-user-history 50 (v32 + sesiones antiguas; para compradores nuevos, los pesos de v24). Resultado: v33 +0,04 ± 0,12 en total; conocidos +0,14 (z = +2,2) | 8bc9187 |
+| **08:25-** | **FINAL: v33-user-history 100 %.** No se cambia nada más | f4c6d66 |
 
 Qué es cada versión:
 - **v8** (campeona nominal por decisión de tarre, y control): v6 reentrenado + señal de producto nuevo. Empatada con v6.
@@ -121,11 +122,11 @@ Otros datos útiles:
 
 | # | Idea | Estado |
 |---|---|---|
-| A | **Ronda 13 (04:35-08:20): v33-user-history frente a v24, 50/50.** Regla fijada a las 05:15, antes de ver más datos: si a las 08:20 la diferencia por tramos de v33 es ≥ 0, la final se juega con v33 (lo respaldan la validación cruzada, +1,1 % con conocidos, y que con compradores nuevos es idéntica a v24); si es negativa, con v24 | En marcha |
+| A | Ronda 13 (04:35-08:20), v33 frente a v24: ganó v33 por la regla fijada (total +0,04; conocidos +0,14, z = +2,2). **v33-user-history es la versión de la final, al 100 % desde las 08:22** | Cerrada |
 | A2 | Búsqueda de señales para compradores conocidos (04:35-05:25, todo offline; detalle en `logs/night_report.md`): historial en carruseles antiguos y sesiones antiguas (+1,1 %, ya en v33); modelo en dos pasos clic × compra (+0,7 %, exigiría cambiar la puntuación: no desplegado); lo enseñado o clicado hoy en nuestros carruseles (+0,2 %); `propensity` del sistema antiguo, precio habitual, tamaño del carrito, afinidad por compras, pesos por página, árboles: nada | Cerrada |
 | B | Productos nuevos: con el ruido bien medido (5,9 puntos por request, no 4) la curva no distingue niveles: sin empujón -0,16 ± 0,35, el doble -0,15, el triple -0,14, sin recortar -0,34 ± 0,46. Se mantiene el nivel de v24 por ser el que más datos tiene, no porque esté demostrado | Cerrada |
 | C | Reentrenar: v29 (03:00) empató con v24. No hace falta otro reentreno antes de la final | Cerrada |
-| D | Ronda final: es la ronda 13 (solo dos versiones, para tener la máxima precisión) | En marcha |
+| D | Ronda final: fue la ronda 13 (solo dos versiones, para tener la máxima precisión) | Cerrada |
 | E | Ya contestadas: pesos separados o un solo juego dan lo mismo (v13 = v14); EASE da lo mismo que el coseno en vivo (v17 = v14); las señales del evento no ayudan (v18); poner el mejor carrito primero no se nota (v22); cruces carrito × señales, árboles, logit condicional: sin mejora offline | Cerradas |
 | F | Descartadas esta noche tras probarlas offline: modelo de árboles, logit condicional, base del histórico sin recompras (sale igual), tabla de parecidos con eventos de hoy (sin diferencia medible), subir el peso de productos nuevos, empujar rebajas | Cerradas |
 
