@@ -67,16 +67,17 @@ DRY_RUN = "--dry-run" in sys.argv
 VARIANTS: dict[str, int] = {
     # Noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12: esta noche el tráfico se
     # reparte para APRENDER qué versión es la mejor.
-    "v24-rate": 30,         # CAMPEONA desde las 02:20: receta de v14 reentrenada a la 01:05 + carritos por cada vista
-                            # del producto (rate_cart). +0,32 sobre v23 (z = +3,3; 3.353 requests)
-    "v26-rate-new2x": 25,   # v24 enseñando el doble de productos nuevos (12 % de los huecos en vez de 6 %)
-    "v27-rate-new3x": 25,   # v24 enseñando 3,5 veces más productos nuevos (20 % de los huecos)
-    "v25-rate-nonew": 10,   # v24 sin empujón a los productos nuevos (0,6 %): -0,40 frente a v24 (z = -2,8) en 30 min.
-                            # Sigue con poco tráfico para afinar la medida: con v24, v26 y v27 da la curva completa
-    "v23-pop-log": 10,      # campeona anterior, como referencia
+    # Ronda 10: curva de exposición a productos nuevos. Los cuatro tienen los MISMOS pesos (receta de v14 reentrenada
+    # a la 01:05 + rate_cart) y solo cambia el peso de "producto nuevo":
+    "v24-rate": 25,         # CAMPEONA desde las 02:13. Productos nuevos en el 6-7 % de los huecos (como v8)
+    "v26-rate-new2x": 25,   # 13 % de los huecos
+    "v27-rate-new3x": 25,   # 21 % de los huecos
+    "v28-rate-learned": 25, # peso tal como lo aprendió el entrenamiento, sin recortar: 32 % (conocidos 41 %, nuevos 9 %)
     # Retiradas (conversión esperada del leaderboard, por tramos):
-    #   v20-split-retrain -0,01 frente a v23 (z = -0,1; 5.060 requests): pop_log no añade nada
-    #   v14-cf-split    -0,20 frente a v23 (z = -2,1) · v22-cart-top: no se nota · v13 y v17: empate con v14
+    #   v25-rate-nonew  v24 sin empujón a productos nuevos (0,6 %): -0,22 frente a v24 (z = -1,9; 2.264 requests) y
+    #                   -0,40 (z = -2,8) en su ventana común -> el empujón vale
+    #   v23-pop-log     -0,22 frente a v24 (z = -2,5; 5.896 requests)
+    #   v20 (= v23 sin pop_log, empate) · v14 (-0,20 frente a v23) · v22-cart-top (no se nota) · v13 y v17 (= v14)
     #   v21, v18, v8, v12, v6, v9-organic, v10-sale, v5-cart-first, v4, v7-explore: ver logs/night_report.md
 }
 
