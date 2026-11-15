@@ -67,14 +67,13 @@ DRY_RUN = "--dry-run" in sys.argv
 VARIANTS: dict[str, int] = {
     # Noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12: esta noche el tráfico se
     # reparte para APRENDER qué versión es la mejor.
-    "v24-rate": 34,         # CAMPEONA desde las 02:13: receta de v14 reentrenada a la 01:05 + rate_cart
-    "v29-rate-retrain": 33, # la misma receta reentrenada a las 03:00 (145.478 respuestas)
-    "v31-rate-known": 33,   # v29 con más peso a rate_cart para compradores conocidos (1,0 en vez de 0,34)
+    "v24-rate": 50,          # CAMPEONA desde las 02:13: receta de v14 reentrenada a la 01:05 + rate_cart
+    "v32-carousel-hist": 50, # receta de v24 reentrenada a las 03:40 + lo que cada comprador hizo en los carruseles antiguos
     # Retiradas (conversión esperada del leaderboard, por tramos, frente a v24):
-    #   Curva de productos nuevos (mismos pesos, distinto empujón): v25 0,6 % de los huecos -0,19 (z = -1,7) ·
-    #   v24 6-7 % (la mejor) · v26 13 % -0,21 (z = -1,7) · v27 21 % -0,23 (z = -1,8) · v28 32 % -0,46 (z = -3,0).
-    #   Conclusión: el empujón a productos nuevos calibrado "como v8" está en su punto; ni menos ni más.
-    #   v23-pop-log -0,22 (z = -2,5) · v20, v14, v22-cart-top, v13, v17, v21, v18, v8, v12, v6, v9, v10, v5, v4, v7:
+    #   v29-rate-retrain -0,03 (z = -0,3; 2.088 requests) y v31-rate-known +0,07 (z = +0,6; 2.073 requests): empates.
+    #                    Reentrenar a las 03:00 o dar más peso a rate_cart con conocidos no cambia nada
+    #   Curva de productos nuevos: v25 0,6 % de los huecos -0,19 · v26 13 % -0,15 · v27 21 % -0,14 · v28 32 % -0,46
+    #   v23-pop-log -0,20 (z = -2,3) · v20, v14, v22-cart-top, v13, v17, v21, v18, v8, v12, v6, v9, v10, v5, v4, v7:
     #   ver logs/night_report.md
 }
 
