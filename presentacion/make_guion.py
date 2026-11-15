@@ -24,6 +24,14 @@ ruido = d.get("ruido", {"total": 5.9})
 hist = {x["grupo"]: x["tasa_pct"] for x in d.get("historial", [])}
 h_buy, h_never = hist.get("lo compró desde un carrusel antiguo"), hist.get("nunca se lo habían enseñado")
 uses_history = champ.startswith("v33")
+seg = d.get("segmentos")
+if seg and seg.get("delante", {}).get("n"):
+    gap_txt = (f"Puesto {seg['puesto']} de {seg['equipos']}. Los {seg['delante']['n']} equipos de delante nos sacan unas décimas en los dos frentes: "
+               f"cold {es(seg['nosotros']['cold'])} % frente a {es(seg['delante']['cold'][0])} %; conocidos {es(seg['nosotros']['conocidos'])} % frente a {es(seg['delante']['conocidos'][0])} %.")
+    ref_txt = (f"A la referencia de los organizadores la ganamos en cold ({es(seg['nosotros']['cold'])} % frente a {es(seg['referencia']['cold'])} %) "
+               f"y perdemos con conocidos ({es(seg['nosotros']['conocidos'])} % frente a {es(seg['referencia']['conocidos'])} %).")
+else:
+    gap_txt = ref_txt = None
 NUM = {1: "uno", 2: "dos", 3: "tres", 4: "cuatro", 5: "cinco"}
 steps_txt = (f"{NUM.get(len(g), len(g)).capitalize()} pasos, +{es(total_gain)} puntos en total (±{es(2 * tot['error'])}). "
              + (f"{NUM.get(n_clear, n_clear).capitalize()} son claros por sí solos; " + ("el otro queda" if len(g) - n_clear == 1 else "los otros quedan") + " dentro del margen."
@@ -73,8 +81,8 @@ slides = [
   "bullets": [f"Los 50 productos más comprados se llevan el {es(d['estrellas']['top50'], 0)} % de las compras del carrusel; los 200, el {es(d['estrellas']['top200'], 0)} %.",
               "No son los que más se venden, sino los que más convencen: carritos por visita.",
               "Con compradores conocidos, 7 de cada 10 compras ya estaban en su carrito.",
-              "Toda compra pasa por un clic, y lo comprado en el carrusel no se vuelve a comprar."],
-  "say": "Esto cambió el modelo: dejamos de medir popularidad por volumen y pasamos a medirla por lo que convence un producto. También comprobamos lo que no hay: ni modas por horas, ni efecto de las rebajas, ni un nivel de precio propio de cada comprador."},
+              "El histórico engaña: allí el 64 % de las compras del carrusel eran recompras; en vivo no se recompra."],
+  "say": "Esto cambió el modelo: dejamos de medir popularidad por volumen y pasamos a medirla por lo que convence un producto. Lo de las recompras lo vimos gracias a la columna propensity: el sistema antiguo elegía solo por popularidad, sin mirar al comprador, así que sus carruseles son un experimento limpio. También comprobamos lo que no hay: ni modas por horas, ni efecto de las rebajas, ni un nivel de precio propio de cada comprador. Y que toda compra pasa por un clic."},
  {"title": "Cómo usamos RawTree",
   "bullets": ["Requests: dos lectores en paralelo cada 0,2 s; respuestas por lotes en hilos aparte.",
               "Estado en SQL, sin ETL: stock cada 2 s; catálogo, popularidad y tasas por producto cada minuto.",
@@ -82,17 +90,22 @@ slides = [
               "Historial de los 2 millones de carruseles antiguos: 10 millones de parejas comprador-producto agregadas en SQL.",
               "Entrenar y medir: feedback unido a requests y eventos en orden temporal; conversión esperada por versión."],
   "say": "Todo el cálculo pesado lo hace RawTree con SQL; en el portátil solo queda multiplicar señales por pesos. Aprendimos a no lanzar descargas grandes mientras producción corre: las bajamos en trozos pequeños, de uno en uno."},
- {"title": "Resultado, y lo que haríamos distinto",
+ {"title": "Resultado: dónde estamos y por qué",
+  "figure": "7_segmentos.png" if gap_txt and (OUT / "7_segmentos.png").exists() else "1_progreso.png",
+  "bullets": [f"De {es(prog[7], 0)} % de la mejora posible a las 18:00 a {es(best_hour, 0)} % de madrugada."]
+             + ([gap_txt, ref_txt] if gap_txt else [])
+             + [f"Versión final: {champ}."],
+  "say": "Cada décima que tenemos está medida frente a la versión anterior, con su margen, y sabemos de dónde viene. También sabemos lo que no sabemos: probamos una docena de señales más esta madrugada y ninguna movió la aguja, así que lo que les falta a nuestras listas no está en las señales que tenemos."},
+ {"title": "Lo que salió mal y lo que haríamos distinto",
   "figure": "1_progreso.png",
-  "bullets": [f"De {es(prog[7], 0)} % de la mejora posible a las 18:00 a {es(best_hour, 0)} % de madrugada.",
-              "Lo que salió mal: paradas por desplegar a mano y cortes de red. De ahí, el despliegue con vuelta atrás y la alarma de conexión.",
-              "Con más tiempo: evaluar versiones sin gastar tráfico con la columna propensity del histórico, y un modelo en dos pasos (clic y compra).",
-              f"Versión final: {champ}."],
-  "say": "Cada décima que tenemos está medida frente a la versión anterior, con su margen, y sabemos de dónde viene. Los equipos de cabeza nos sacan ventaja sobre todo con compradores conocidos; ahí es donde seguiríamos buscando."},
+  "bullets": ["Tres paradas por desplegar a mano y tres cortes de red: de ahí salieron el despliegue con vuelta atrás y la alarma de conexión.",
+              "Medimos tarde el ruido de nuestra propia regla: varias decisiones de la noche se tomaron con menos certeza de la que creíamos.",
+              "Con más tiempo: evaluar versiones sin gastar tráfico con la columna propensity, y un modelo en dos pasos (clic y compra)."],
+  "say": "Los dos bajones de la curva son las paradas del sábado por la tarde y los cortes de red de medianoche. Si empezáramos hoy, lo primero sería la herramienta de medida, y lo segundo aprovechar que el sistema antiguo sorteaba por popularidad para probar ideas con el histórico antes de gastar tráfico real."},
 ]
 
 md = ["# Guion de la presentación al jurado (team_23)", "",
-      "_Generado con los números actuales. 8 diapositivas, unos 5 minutos. En **negrita** lo que hay en pantalla; en cursiva, lo que se dice._", ""]
+      f"_Generado con los números actuales. {len(slides)} diapositivas, unos 6 minutos. En **negrita** lo que hay en pantalla; en cursiva, lo que se dice._", ""]
 html = ["<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>",
         "<title>team_23 · Presentación</title><style>",
         ":root{--surface:#fcfcfb;--page:#f9f9f7;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--line:#e1e0d9;--accent:#2a78d6}",

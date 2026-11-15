@@ -205,5 +205,37 @@ try:
 except Exception as e:
     print("figura 6 no generada:", e)
 
+# ------------------------------------------------------------------ 7. dónde estamos: cold frente a conocidos
+try:
+    d3 = monitor._fetch(now - 3 * 3600, now)
+    mine = next(t for t in d3["teams"] if t["team_id"] == monitor.TEAM)
+    share = sum(v.get("cold_requests", 0) for v in mine["versions"]) / sum(v["requests"] for v in mine["versions"])   # cuota de requests cold
+    known = lambda t: (t["conversion"] - share * t["cold_conversion"]) / (1 - share)
+    teams = [t for t in d3["teams"] if t["requests"] and t["on_time"] >= 95 and t["team_id"] != monitor.TEAM]
+    best = max(teams, key=lambda t: t["conversion"])
+    ref = d3["reference"]
+    f, ax = fig("Dónde nos ganan: un poco en los dos tipos de comprador",
+                "Últimas 3 horas. Cada punto es un equipo (solo los que responden a tiempo el 95 % o más).", size=(8, 4.8))
+    f.subplots_adjust(top=0.79, bottom=0.13)
+    ax.scatter([t["cold_conversion"] for t in teams], [known(t) for t in teams], s=42, color=GRAY, edgecolor=SURFACE, linewidth=1.5, zorder=2)
+    ax.scatter([ref["cold_conversion"]], [known(ref)], s=70, color=INK2, marker="D", edgecolor=SURFACE, linewidth=2, zorder=3)
+    ax.scatter([mine["cold_conversion"]], [known(mine)], s=90, color=BLUE, edgecolor=SURFACE, linewidth=2, zorder=4)
+    ax.annotate("nosotros", (mine["cold_conversion"], known(mine)), xytext=(0, -16), textcoords="offset points", ha="center", fontsize=10.5, color=INK, fontweight="bold")
+    ax.annotate("referencia de\nlos organizadores", (ref["cold_conversion"], known(ref)), xytext=(10, 0), textcoords="offset points", va="center", fontsize=10, color=INK2)
+    ax.annotate("mejor equipo", (best["cold_conversion"], known(best)), xytext=(0, 10), textcoords="offset points", ha="center", fontsize=10, color=INK2)
+    ax.set_xlabel("conversión en requests cold (%)"); ax.set_ylabel("conversión con compradores conocidos (%)")
+    ax.xaxis.set_major_formatter(COMMA); ax.yaxis.set_major_formatter(COMMA); ax.grid(axis="x", visible=True)
+    f.savefig(OUT / "7_segmentos.png"); plt.close(f)
+    ahead = [t for t in teams if t["conversion"] > mine["conversion"]]      # los equipos fiables que van por delante
+    datos["segmentos"] = {"cuota_cold": round(share, 3),
+                          "nosotros": {"conv": round(mine["conversion"], 2), "cold": round(mine["cold_conversion"], 2), "conocidos": round(known(mine), 2)},
+                          "referencia": {"conv": round(ref["conversion"], 2), "cold": round(ref["cold_conversion"], 2), "conocidos": round(known(ref), 2)},
+                          "mejor": {"equipo": best["team_id"], "conv": round(best["conversion"], 2), "cold": round(best["cold_conversion"], 2), "conocidos": round(known(best), 2)},
+                          "delante": {"n": len(ahead), "cold": [round(float(np.median([t["cold_conversion"] for t in ahead])), 2)] if ahead else [],
+                                      "conocidos": [round(float(np.median([known(t) for t in ahead])), 2)] if ahead else []},
+                          "puesto": 1 + sum(t["conversion"] > mine["conversion"] for t in d3["teams"] if t["team_id"] != monitor.TEAM), "equipos": len(d3["teams"])}
+except Exception as e:
+    print("figura 7 no generada:", e)
+
 (OUT / "datos.json").write_text(json.dumps(datos, indent=1, ensure_ascii=False))
 print(json.dumps(datos, ensure_ascii=False)[:1500])

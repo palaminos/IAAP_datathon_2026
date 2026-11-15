@@ -1,6 +1,6 @@
 # Guion de la presentación al jurado (team_23)
 
-_Generado con los números actuales. 8 diapositivas, unos 5 minutos. En **negrita** lo que hay en pantalla; en cursiva, lo que se dice._
+_Generado con los números actuales. 9 diapositivas, unos 6 minutos. En **negrita** lo que hay en pantalla; en cursiva, lo que se dice._
 
 ## 1. team_23 · Un recomendador que aprende mientras atiende
 
@@ -60,9 +60,9 @@ _A las cinco de la mañana medimos bien el ruido, con 210 comparaciones entre ve
 - **Los 50 productos más comprados se llevan el 65 % de las compras del carrusel; los 200, el 93 %.**
 - **No son los que más se venden, sino los que más convencen: carritos por visita.**
 - **Con compradores conocidos, 7 de cada 10 compras ya estaban en su carrito.**
-- **Toda compra pasa por un clic, y lo comprado en el carrusel no se vuelve a comprar.**
+- **El histórico engaña: allí el 64 % de las compras del carrusel eran recompras; en vivo no se recompra.**
 
-_Esto cambió el modelo: dejamos de medir popularidad por volumen y pasamos a medirla por lo que convence un producto. También comprobamos lo que no hay: ni modas por horas, ni efecto de las rebajas, ni un nivel de precio propio de cada comprador._
+_Esto cambió el modelo: dejamos de medir popularidad por volumen y pasamos a medirla por lo que convence un producto. Lo de las recompras lo vimos gracias a la columna propensity: el sistema antiguo elegía solo por popularidad, sin mirar al comprador, así que sus carruseles son un experimento limpio. También comprobamos lo que no hay: ni modas por horas, ni efecto de las rebajas, ni un nivel de precio propio de cada comprador. Y que toda compra pasa por un clic._
 
 ## 7. Cómo usamos RawTree
 
@@ -74,13 +74,23 @@ _Esto cambió el modelo: dejamos de medir popularidad por volumen y pasamos a me
 
 _Todo el cálculo pesado lo hace RawTree con SQL; en el portátil solo queda multiplicar señales por pesos. Aprendimos a no lanzar descargas grandes mientras producción corre: las bajamos en trozos pequeños, de uno en uno._
 
-## 8. Resultado, y lo que haríamos distinto
+## 8. Resultado: dónde estamos y por qué
+
+![](7_segmentos.png)
+
+- **De 38 % de la mejora posible a las 18:00 a 49 % de madrugada.**
+- **Puesto 10 de 42. Los 7 equipos de delante nos sacan unas décimas en los dos frentes: cold 2,28 % frente a 2,51 %; conocidos 1,52 % frente a 1,75 %.**
+- **A la referencia de los organizadores la ganamos en cold (2,28 % frente a 1,63 %) y perdemos con conocidos (1,52 % frente a 2,06 %).**
+- **Versión final: v24-rate.**
+
+_Cada décima que tenemos está medida frente a la versión anterior, con su margen, y sabemos de dónde viene. También sabemos lo que no sabemos: probamos una docena de señales más esta madrugada y ninguna movió la aguja, así que lo que les falta a nuestras listas no está en las señales que tenemos._
+
+## 9. Lo que salió mal y lo que haríamos distinto
 
 ![](1_progreso.png)
 
-- **De 38 % de la mejora posible a las 18:00 a 49 % de madrugada.**
-- **Lo que salió mal: paradas por desplegar a mano y cortes de red. De ahí, el despliegue con vuelta atrás y la alarma de conexión.**
-- **Con más tiempo: evaluar versiones sin gastar tráfico con la columna propensity del histórico, y un modelo en dos pasos (clic y compra).**
-- **Versión final: v24-rate.**
+- **Tres paradas por desplegar a mano y tres cortes de red: de ahí salieron el despliegue con vuelta atrás y la alarma de conexión.**
+- **Medimos tarde el ruido de nuestra propia regla: varias decisiones de la noche se tomaron con menos certeza de la que creíamos.**
+- **Con más tiempo: evaluar versiones sin gastar tráfico con la columna propensity, y un modelo en dos pasos (clic y compra).**
 
-_Cada décima que tenemos está medida frente a la versión anterior, con su margen, y sabemos de dónde viene. Los equipos de cabeza nos sacan ventaja sobre todo con compradores conocidos; ahí es donde seguiríamos buscando._
+_Los dos bajones de la curva son las paradas del sábado por la tarde y los cortes de red de medianoche. Si empezáramos hoy, lo primero sería la herramienta de medida, y lo segundo aprovechar que el sistema antiguo sorteaba por popularidad para probar ideas con el histórico antes de gastar tráfico real._
