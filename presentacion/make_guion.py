@@ -17,14 +17,26 @@ g = d["mejoras"]
 prog = d["progreso"]["nosotros"]
 best_hour = max(prog[:-1])
 lat = d["latencia_s"]
-total_gain = sum(x["ganancia"] for x in g)
+tot = d.get("mejora_total", {"ganancia": sum(x["ganancia"] for x in g), "error": 0.0})
+total_gain = tot["ganancia"]
+n_clear = sum(bool(x.get("clara")) for x in g)
+ruido = d.get("ruido", {"total": 5.9})
+hist = {x["grupo"]: x["tasa_pct"] for x in d.get("historial", [])}
+h_buy, h_never = hist.get("lo compró desde un carrusel antiguo"), hist.get("nunca se lo habían enseñado")
+uses_history = champ.startswith("v33")
+NUM = {1: "uno", 2: "dos", 3: "tres", 4: "cuatro", 5: "cinco"}
+steps_txt = (f"{NUM.get(len(g), len(g)).capitalize()} pasos, +{es(total_gain)} puntos en total (±{es(2 * tot['error'])}). "
+             + (f"{NUM.get(n_clear, n_clear).capitalize()} son claros por sí solos; " + ("el otro queda" if len(g) - n_clear == 1 else "los otros quedan") + " dentro del margen."
+                if n_clear < len(g) else "Todos claros por sí solos."))
+history_bullet = (f"Lo que cada comprador hizo en el sistema antiguo: si compró un producto desde un carrusel, lo compra {es(h_buy / h_never, 0)} veces más que uno que nunca vio."
+                  if h_buy and h_never else "Lo que cada comprador hizo en los carruseles del sistema antiguo.")
 
 slides = [
  {"title": "team_23 · Un recomendador que aprende mientras atiende",
   "bullets": [f"Capturamos el {es(best_hour, 0)} % de la mejora máxima posible (0 = los más vendidos, 100 = la lista perfecta).",
               "Respondemos en 1 segundo de mediana, con el límite en 3.",
-              f"Tres mejoras seguidas demostradas en vivo durante la noche: +{es(total_gain)} puntos de conversión en total."],
-  "say": "Somos cuatro y empezamos de cero el sábado por la mañana. Nuestra idea ha sido sencilla: un modelo que se pueda explicar, y que cada cambio se gane su sitio con datos en vivo."},
+              f"De la versión del sábado a la final: +{es(total_gain)} puntos de conversión (±{es(2 * tot['error'])}), medidos en vivo."],
+  "say": "Somos cuatro y empezamos de cero el sábado por la mañana. Nuestra idea ha sido sencilla: un modelo que se pueda explicar, y que cada cambio se gane su sitio con datos en vivo y con su margen de error."},
  {"title": "Cómo funciona: una request, 10 productos, 1 milisegundo de cálculo",
   "figure": "5_latencia.png",
   "bullets": ["Memoria de cada comprador: visto, carrito y comprado (60 días + hoy).",
@@ -32,46 +44,51 @@ slides = [
               f"Lectura, cálculo y envío en hilos separados: de {es(lat['antes']['p50'], 1)} a {es(lat['despues']['p50'], 1)} s de mediana.",
               "Cada despliegue pasa una prueba con requests reales y tiene vuelta atrás."],
   "say": "La fiabilidad va primero: si no respondes a tiempo, da igual lo bueno que sea el modelo. Lo ya comprado y lo agotado se quitan de la lista. Tuvimos tres paradas el sábado por desplegar a mano; de ahí salió el despliegue con comprobación previa y vuelta atrás con un comando."},
- {"title": "El modelo, en cuatro ideas que se pueden leer",
-  "bullets": ["Lo que el comprador ya hizo: lo que tiene en el carrito sube; lo que ya compró, fuera (en vivo no se recompra).",
+ {"title": "El modelo, en ideas que se pueden leer",
+  **({"figure": "6_historial.png"} if uses_history and (OUT / "6_historial.png").exists() else {}),
+  "bullets": ["Lo que el comprador ya hizo: su carrito sube; lo que ya compró, fuera (en vivo no se recompra).",
               "Lo que acaba de ver en esta sesión.",
               "Parecido entre productos: \"quien metió X en el carrito o lo compró, también Y\".",
-              "Lo bueno que es el producto: carritos por cada visita, no ventas totales.",
-              "Pesos distintos para compradores nuevos y conocidos: a los nuevos les mueve lo que convence a todos; a los conocidos, su carrito y su historial."],
-  "say": "Es una suma de señales con pesos. Lo elegimos así a propósito: se entrena en segundos, responde en un milisegundo y cuando algo va mal podemos mirar qué peso lo causa."},
+              "Lo bueno que es el producto: carritos por cada visita, no ventas totales."]
+             + ([history_bullet] if uses_history else [])
+             + ["Pesos distintos para compradores nuevos y conocidos."],
+  "say": "Es una suma de señales con pesos. Lo elegimos así a propósito: se entrena en segundos, responde en un milisegundo y cuando algo va mal podemos mirar qué peso lo causa. A los compradores nuevos les mueve lo que convence a todos; a los conocidos, su carrito y su historial."
+         + (" La última señal salió de una tabla que casi nadie mira: los carruseles del sistema antiguo guardan qué enseñó, qué se clicó y qué se compró, comprador a comprador." if uses_history else "")},
  {"title": "Aprender del stream: reentrenar con nuestras propias respuestas",
   "figure": "2_mejoras.png",
-  "bullets": ["Cada pocas horas se reajustan los pesos con lo que de verdad se compró.",
+  "bullets": ["Cada minuto: eventos nuevos a la memoria de cada comprador, tasas de cada producto y productos nuevos.",
+              "Cada pocas horas: los pesos se reajustan con lo que de verdad se compró en nuestras listas.",
               "Cada versión nueva entra con parte del tráfico y compite con la campeona.",
-              f"Tres pasos seguidos: +{es(g[0]['ganancia'])}, +{es(g[1]['ganancia'])} y +{es(g[2]['ganancia'])} puntos de conversión."],
+              steps_txt],
   "say": "El histórico no se comporta igual que el vivo, así que sus pesos solo son el punto de partida. Para reentrenar reproducimos el día en orden, cada request con lo que se sabía en ese momento, para no hacer trampa. Lo que más nos ha dado es aprender de las listas que nosotros mismos enseñamos."},
- {"title": "Decidir con datos: lo que parecía buena idea y no lo era",
+ {"title": "Decidir con datos: antes de medir, medir la regla",
   "figure": "3_productos_nuevos.png",
-  "bullets": ["Dos versiones idénticas pueden diferir 0,3 puntos con 600 requests.",
-              "Regla: no decidir con menos de 3.000 requests ni de 2 errores típicos.",
-              "Productos nuevos: ni sin empujón ni con más. Cinco niveles a la vez.",
-              "Más de 25 versiones en un día; cada retirada, con su número."],
-  "say": "Nos equivocamos varias veces, y lo interesante es cómo lo supimos: por la conversión esperada del leaderboard por versión, que tiene mucho menos ruido que contar compras. Perdieron en vivo ideas que ganaban en pruebas con datos guardados: poner todos los carritos primero, empujar las rebajas, un modelo de árboles. Llegamos a quitar el empujón a los productos nuevos por un análisis con pocas compras; la prueba en vivo dijo lo contrario en media hora."},
+  "bullets": ["Comparamos versiones con la conversión esperada del leaderboard: mucho menos ruido que contar compras.",
+              f"Medimos ese ruido: {es(ruido['total'], 1)} puntos por request. Dos versiones idénticas difieren 0,3 puntos con 600 requests.",
+              "Regla: promocionar solo con 2 errores típicos y 3.000 requests.",
+              "Nos corregimos: empezamos suponiendo un ruido de 4 y varias \"victorias\" no lo eran."],
+  "say": "A las cinco de la mañana medimos bien el ruido, con 210 comparaciones entre versiones que corrieron a la vez, y salió un 50 % mayor del que usábamos. Releímos la noche entera: las mejoras grandes siguen en pie y otras decisiones, como cuántos productos nuevos enseñar, quedaron en \"no se puede saber con estos datos\". Preferimos contarlo así. También perdieron en vivo ideas que ganaban con datos guardados: poner todos los carritos primero, empujar las rebajas, un modelo de árboles."},
  {"title": "Lo que aprendimos de esta tienda",
   "figure": "4_estrellas.png",
   "bullets": [f"Los 50 productos más comprados se llevan el {es(d['estrellas']['top50'], 0)} % de las compras del carrusel; los 200, el {es(d['estrellas']['top200'], 0)} %.",
               "No son los que más se venden, sino los que más convencen: carritos por visita.",
-              "Con compradores conocidos, 7 de cada 10 compras ya estaban en su carrito."],
-  "say": "Esto cambió el modelo: dejamos de medir popularidad por volumen y pasamos a medirla por lo que convence un producto. Fue la última gran mejora de la noche. También comprobamos lo que no hay: ni modas por horas ni efecto de las rebajas en el carrusel."},
+              "Con compradores conocidos, 7 de cada 10 compras ya estaban en su carrito.",
+              "Toda compra pasa por un clic, y lo comprado en el carrusel no se vuelve a comprar."],
+  "say": "Esto cambió el modelo: dejamos de medir popularidad por volumen y pasamos a medirla por lo que convence un producto. También comprobamos lo que no hay: ni modas por horas, ni efecto de las rebajas, ni un nivel de precio propio de cada comprador."},
  {"title": "Cómo usamos RawTree",
   "bullets": ["Requests: dos lectores en paralelo cada 0,2 s; respuestas por lotes en hilos aparte.",
-              "Estado en SQL, sin ETL: stock cada 2 s; catálogo, popularidad y tasas por producto cada minuto (una fila por producto).",
-              "Memoria de compradores y tabla de parecidos entre productos con agregaciones y un self-join sobre 12 millones de eventos.",
-              "Entrenamiento: feedback unido a requests y a eventos, reproducido en orden temporal.",
-              "Medida: la conversión esperada por versión del leaderboard, por tramos entre despliegues."],
-  "say": "Todo el cálculo pesado lo hace RawTree con SQL; en el portátil solo queda multiplicar señales por pesos. Aprendimos a no lanzar descargas grandes mientras producción corre."},
+              "Estado en SQL, sin ETL: stock cada 2 s; catálogo, popularidad y tasas por producto cada minuto.",
+              "Memoria de compradores y parecido entre productos: agregaciones y un self-join sobre 12 millones de eventos.",
+              "Historial de los 2 millones de carruseles antiguos: 10 millones de parejas comprador-producto agregadas en SQL.",
+              "Entrenar y medir: feedback unido a requests y eventos en orden temporal; conversión esperada por versión."],
+  "say": "Todo el cálculo pesado lo hace RawTree con SQL; en el portátil solo queda multiplicar señales por pesos. Aprendimos a no lanzar descargas grandes mientras producción corre: las bajamos en trozos pequeños, de uno en uno."},
  {"title": "Resultado, y lo que haríamos distinto",
   "figure": "1_progreso.png",
   "bullets": [f"De {es(prog[7], 0)} % de la mejora posible a las 18:00 a {es(best_hour, 0)} % de madrugada.",
-              "Lo que salió mal: paradas por desplegar a mano y cortes de red. De ahí salieron el despliegue con vuelta atrás y la alarma de conexión.",
-              "Con más tiempo: compradores conocidos, y precio según dispositivo y región.",
+              "Lo que salió mal: paradas por desplegar a mano y cortes de red. De ahí, el despliegue con vuelta atrás y la alarma de conexión.",
+              "Con más tiempo: evaluar versiones sin gastar tráfico con la columna propensity del histórico, y un modelo en dos pasos (clic y compra).",
               f"Versión final: {champ}."],
-  "say": "Cada décima que tenemos está medida frente a la versión anterior y sabemos de dónde viene. Eso es lo que nos llevamos."},
+  "say": "Cada décima que tenemos está medida frente a la versión anterior, con su margen, y sabemos de dónde viene. Los equipos de cabeza nos sacan ventaja sobre todo con compradores conocidos; ahí es donde seguiríamos buscando."},
 ]
 
 md = ["# Guion de la presentación al jurado (team_23)", "",

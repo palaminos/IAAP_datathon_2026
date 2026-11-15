@@ -17,7 +17,9 @@
    "00:00",
    "01:00",
    "02:00",
-   "03:00"
+   "03:00",
+   "04:00",
+   "05:00"
   ],
   "nosotros": [
    0.0,
@@ -36,7 +38,9 @@
    41.7893,
    48.6124,
    49.3897,
-   49.3427
+   49.4126,
+   49.4458,
+   47.4224
   ],
   "lider": "team_06"
  },
@@ -45,30 +49,43 @@
    "de": "v8-new-products",
    "a": "v14-cf-split",
    "ganancia": 0.307,
-   "error": 0.087,
-   "requests": 5109
+   "error": 0.128,
+   "requests": 5109,
+   "clara": true
   },
   {
    "de": "v14-cf-split",
    "a": "v23-pop-log",
    "ganancia": 0.205,
-   "error": 0.102,
-   "requests": 3797
+   "error": 0.151,
+   "requests": 3797,
+   "clara": false
   },
   {
    "de": "v23-pop-log",
    "a": "v24-rate",
    "ganancia": 0.274,
-   "error": 0.091,
-   "requests": 4456
+   "error": 0.135,
+   "requests": 4456,
+   "clara": true
   }
  ],
+ "mejora_total": {
+  "ganancia": 0.786,
+  "error": 0.239,
+  "z": 3.3
+ },
+ "ruido": {
+  "total": 5.9,
+  "conocidos": 4.8,
+  "cold": 7.5
+ },
  "productos_nuevos": [
   {
    "version": "v25-rate-nonew",
    "huecos_pct": 0.6,
    "dif": -0.159,
-   "error": 0.118,
+   "error": 0.174,
    "requests": 2166
   },
   {
@@ -82,29 +99,30 @@
    "version": "v26-rate-new2x",
    "huecos_pct": 13,
    "dif": -0.15,
-   "error": 0.118,
+   "error": 0.174,
    "requests": 2244
   },
   {
    "version": "v27-rate-new3x",
    "huecos_pct": 21,
    "dif": -0.14,
-   "error": 0.117,
+   "error": 0.173,
    "requests": 2292
   },
   {
    "version": "v28-rate-learned",
    "huecos_pct": 32,
    "dif": -0.34,
-   "error": 0.154,
+   "error": 0.228,
    "requests": 1341
   }
  ],
+ "productos_nuevos_claros": [],
  "estrellas": {
   "top10": 29.9,
-  "top50": 64.3,
-  "top200": 92.9,
-  "compras": 2241
+  "top50": 64.8,
+  "top200": 92.8,
+  "compras": 2579
  },
  "latencia_s": {
   "antes": {
@@ -113,7 +131,39 @@
   },
   "despues": {
    "p50": 1.04,
-   "p99": 2.31
+   "p99": 2.22
   }
- }
+ },
+ "historial": [
+  {
+   "grupo": "nunca se lo habían enseñado",
+   "tasa_pct": 0.203,
+   "compras": 135,
+   "impresiones": 66515
+  },
+  {
+   "grupo": "enseñado 4 veces o más, sin tocarlo",
+   "tasa_pct": 0.204,
+   "compras": 311,
+   "impresiones": 152446
+  },
+  {
+   "grupo": "enseñado 1 vez, sin tocarlo",
+   "tasa_pct": 0.316,
+   "compras": 135,
+   "impresiones": 42763
+  },
+  {
+   "grupo": "lo clicó, sin comprarlo",
+   "tasa_pct": 0.549,
+   "compras": 65,
+   "impresiones": 11831
+  },
+  {
+   "grupo": "lo compró desde un carrusel antiguo",
+   "tasa_pct": 2.563,
+   "compras": 169,
+   "impresiones": 6594
+  }
+ ]
 }
