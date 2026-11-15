@@ -67,18 +67,15 @@ DRY_RUN = "--dry-run" in sys.argv
 VARIANTS: dict[str, int] = {
     # Noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12: esta noche el tráfico se
     # reparte para APRENDER qué versión es la mejor.
-    # Ronda 10: curva de exposición a productos nuevos. Los cuatro tienen los MISMOS pesos (receta de v14 reentrenada
-    # a la 01:05 + rate_cart) y solo cambia el peso de "producto nuevo":
-    "v24-rate": 25,         # CAMPEONA desde las 02:13. Productos nuevos en el 6-7 % de los huecos (como v8)
-    "v26-rate-new2x": 25,   # 13 % de los huecos
-    "v27-rate-new3x": 25,   # 21 % de los huecos
-    "v28-rate-learned": 25, # peso tal como lo aprendió el entrenamiento, sin recortar: 32 % (conocidos 41 %, nuevos 9 %)
-    # Retiradas (conversión esperada del leaderboard, por tramos):
-    #   v25-rate-nonew  v24 sin empujón a productos nuevos (0,6 %): -0,22 frente a v24 (z = -1,9; 2.264 requests) y
-    #                   -0,40 (z = -2,8) en su ventana común -> el empujón vale
-    #   v23-pop-log     -0,22 frente a v24 (z = -2,5; 5.896 requests)
-    #   v20 (= v23 sin pop_log, empate) · v14 (-0,20 frente a v23) · v22-cart-top (no se nota) · v13 y v17 (= v14)
-    #   v21, v18, v8, v12, v6, v9-organic, v10-sale, v5-cart-first, v4, v7-explore: ver logs/night_report.md
+    "v24-rate": 34,         # CAMPEONA desde las 02:13: receta de v14 reentrenada a la 01:05 + rate_cart
+    "v29-rate-retrain": 33, # la misma receta reentrenada a las 03:00 (145.478 respuestas)
+    "v31-rate-known": 33,   # v29 con más peso a rate_cart para compradores conocidos (1,0 en vez de 0,34)
+    # Retiradas (conversión esperada del leaderboard, por tramos, frente a v24):
+    #   Curva de productos nuevos (mismos pesos, distinto empujón): v25 0,6 % de los huecos -0,19 (z = -1,7) ·
+    #   v24 6-7 % (la mejor) · v26 13 % -0,21 (z = -1,7) · v27 21 % -0,23 (z = -1,8) · v28 32 % -0,46 (z = -3,0).
+    #   Conclusión: el empujón a productos nuevos calibrado "como v8" está en su punto; ni menos ni más.
+    #   v23-pop-log -0,22 (z = -2,5) · v20, v14, v22-cart-top, v13, v17, v21, v18, v8, v12, v6, v9, v10, v5, v4, v7:
+    #   ver logs/night_report.md
 }
 
 # Exploración: variante -> versión de cuyas puntuaciones parte el sorteo.
