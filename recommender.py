@@ -65,20 +65,7 @@ DRY_RUN = "--dry-run" in sys.argv
 # para el mismo comprador). La clave es la etiqueta model_version que muestra `monitor.py conv`.
 # Para la final, dejad solo la ganadora al 100.
 VARIANTS: dict[str, int] = {
-    # Noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12: esta noche el tráfico se
-    # reparte para APRENDER qué versión es la mejor.
-    "v24-rate": 50,          # CAMPEONA desde las 02:13: receta de v14 reentrenada a la 01:05 + rate_cart
-    "v33-user-history": 50,  # v32 + en cuántas sesiones antiguas vio el comprador cada producto (hs_views); reentrenada a
-                             # las 04:25. Para compradores nuevos usa EXACTAMENTE los pesos de v24 (v33n = v24n)
-    # Retiradas (conversión esperada del leaderboard, por tramos, frente a v24):
-    #   v32-carousel-hist (03:50-04:30, ~2.500 requests): con compradores conocidos +0,02 (empate); el -0,87 en cold es
-    #                    ruido (sus listas para compradores nuevos coinciden con las de v24 en 9,3 de 10 productos). Sus
-    #                    señales siguen dentro de v33
-    #   v29-rate-retrain -0,03 (z = -0,3; 2.088 requests) y v31-rate-known +0,07 (z = +0,6; 2.073 requests): empates.
-    #                    Reentrenar a las 03:00 o dar más peso a rate_cart con conocidos no cambia nada
-    #   Curva de productos nuevos: v25 0,6 % de los huecos -0,19 · v26 13 % -0,15 · v27 21 % -0,14 · v28 32 % -0,46
-    #   v23-pop-log -0,20 (z = -2,3) · v20, v14, v22-cart-top, v13, v17, v21, v18, v8, v12, v6, v9, v10, v5, v4, v7:
-    #   ver logs/night_report.md
+    "v33-user-history": 100,   # FINAL: una sola versión con todo el tráfico
 }
 
 # Exploración: variante -> versión de cuyas puntuaciones parte el sorteo.
