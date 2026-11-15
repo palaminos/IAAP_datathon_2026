@@ -199,8 +199,11 @@ def lb(minutes: int = 60) -> None:
     print("  Con menos de ~1.000 requests por versión, diferencias de 0,15 puntos aún pueden ser ruido.")
 
 
-NOISE_SD = 4.0   # desviación típica de la conversión esperada de UNA request, en puntos (medida el sábado
-                 # con ventanas vecinas de una misma versión y con el par gemelo v6/v10 sin rebajas: 3,5-4,5)
+NOISE_SD = 5.9   # desviación típica de la conversión esperada de UNA request, en puntos. Medida la noche del
+# sábado con las diferencias entre versiones que corrieron a la vez, en ventanas de 15 minutos (analysis/ab_noise.py,
+# 210 comparaciones): total 5,9 · compradores conocidos 4,8 · cold 7,5. Hasta las 05:15 del domingo se usó 4,0 (medido
+# con solo dos versiones gemelas): todas las z anteriores están infladas un 50 %.
+NOISE_KNOWN, NOISE_COLD = 4.8, 7.5
 
 
 def _fetch(a: int, b: int) -> dict:
@@ -283,24 +286,35 @@ def stratified(periods: list[str], champion: str, end: float | None = None, cont
         cold_n = sum(g["cold_n"] for g in group)
         conv = sum(g["conv"] * g["n"] for g in group) / tot
         cold = sum(g["cold"] * g["cold_n"] for g in group if g["cold_n"]) / max(cold_n, 1)
-        c = {"n": tot, "conv": conv, "cold": cold, "known": (conv * tot - cold * cold_n) / max(tot - cold_n, 1)}
+        c = {"n": tot, "conv": conv, "cold": cold, "cold_n": cold_n, "known": (conv * tot - cold * cold_n) / max(tot - cold_n, 1)}
         for name, x in vs.items():
             if name in (control or [champion]):
                 continue
             var = NOISE_SD ** 2 * (1 / x["n"] + 1 / c["n"])
-            r = acc.setdefault(name, {"w": 0.0, "wd": 0.0, "n": 0, "nc": 0, "s": 0.0, "sc": 0.0, "kd": 0.0, "cd": 0.0, "tramos": 0})
+            r = acc.setdefault(name, {"w": 0.0, "wd": 0.0, "n": 0, "nc": 0, "s": 0.0, "sc": 0.0, "kd": 0.0, "cd": 0.0, "tramos": 0,
+                                      "kw": 0.0, "kwd": 0.0, "cw": 0.0, "cwd": 0.0})
             r["w"] += 1 / var
             r["wd"] += (x["conv"] - c["conv"]) / var
             r["kd"] += (x["known"] - c["known"]) / var
             r["cd"] += (x["cold"] - c["cold"]) / var
+            # cada segmento con su propio ruido y sus propias requests (para la z de conocidos y la de cold)
+            xk, ck = x["n"] - x["cold_n"], c["n"] - c["cold_n"]
+            if xk > 0 and ck > 0 and x["cold_n"] > 0 and c["cold_n"] > 0:
+                vk, vc = NOISE_KNOWN ** 2 * (1 / xk + 1 / ck), NOISE_COLD ** 2 * (1 / x["cold_n"] + 1 / c["cold_n"])
+                r["kw"] += 1 / vk; r["kwd"] += (x["known"] - c["known"]) / vk
+                r["cw"] += 1 / vc; r["cwd"] += (x["cold"] - c["cold"]) / vc
             r["n"] += x["n"]; r["nc"] += c["n"]; r["s"] += x["conv"] * x["n"]; r["sc"] += c["conv"] * c["n"]; r["tramos"] += 1
     hhmm = lambda t: dt.datetime.fromtimestamp(t).strftime("%H:%M")
     lines = [f"cada versión frente a {' + '.join(control) if control else champion}, por tramos desde {hhmm(ts[0])} (solo los tramos en que corrieron las dos)",
-             f"  {'versión':<20}{'tramos':>7}{'requests':>10}{'conv %':>8}{'campeona':>10}{'diferencia':>12}{'± error':>9}{'z':>7}{'conocidos':>11}{'cold':>8}"]
+             f"  {'versión':<20}{'tramos':>7}{'requests':>10}{'conv %':>8}{'campeona':>10}{'diferencia':>12}{'± error':>9}{'z':>7}{'conocidos (z)':>16}{'cold (z)':>15}"]
     for name, r in sorted(acc.items(), key=lambda kv: -kv[1]["wd"] / kv[1]["w"]):
         d, se = r["wd"] / r["w"], r["w"] ** -0.5
-        lines.append(f"  {name:<20}{r['tramos']:>7}{r['n']:>10}{r['s'] / r['n']:>8.3f}{r['sc'] / r['nc']:>10.3f}{d:>+12.3f}{se:>9.3f}{d / se:>+7.1f}"
-                     f"{r['kd'] / r['w']:>+11.3f}{r['cd'] / r['w']:>+8.3f}")
+        if r["kw"] > 0:
+            kd, cd = r["kwd"] / r["kw"], r["cwd"] / r["cw"]
+            seg = f"{kd:>+9.3f} ({kd * r['kw'] ** 0.5:+.1f})".rjust(16) + f"{cd:>+8.3f} ({cd * r['cw'] ** 0.5:+.1f})".rjust(15)
+        else:
+            seg = f"{r['kd'] / r['w']:>+16.3f}{r['cd'] / r['w']:>+15.3f}"
+        lines.append(f"  {name:<20}{r['tramos']:>7}{r['n']:>10}{r['s'] / r['n']:>8.3f}{r['sc'] / r['nc']:>10.3f}{d:>+12.3f}{se:>9.3f}{d / se:>+7.1f}{seg}")
     return lines
 
 
@@ -311,7 +325,7 @@ def ab() -> None:
     if st.get("control"):   # versiones que los datos dan por equivalentes a la campeona: sumadas hacen de control con menos ruido
         print("\n" + "\n".join(stratified(st["periods"], st["champion"], control=st["control"])))
     print("  diferencia = puntos de conversión sobre la campeona; z = diferencia / error (|z| < 2: puede ser suerte)")
-    print("  conocidos / cold = la misma diferencia solo con compradores conocidos / nuevos")
+    print("  conocidos / cold = la misma diferencia solo con requests de compradores conocidos / solo con requests cold, cada una con su z")
 
 
 def lbs(hhmm: str = "") -> None:
