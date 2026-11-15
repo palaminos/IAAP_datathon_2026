@@ -68,7 +68,8 @@ Diario: `logs/night_report.md`. Estado: `logs/night_state.json` (campeona, retad
 | 22:00-22:28 | v8 30 (control) · v14 19 · v17 19 · v18 19 · v12 13 | b41e021 |
 | 22:30-23:19 | v14 30 (CAMPEONA) · v17 25 · v13 25 · v8 10 · v18 10 | 36b8a6b |
 | 23:20-00:23 | v14 25 · v13 20 · v20 20 · v21 20 · v17 15 (sin red 23:51-23:58 y 00:07-00:14) | 9fe5af5 |
-| 00:25- | v14 30 · v22-cart-top 25 · v23-pop-log 25 · v20 20 | ad27e8e |
+| 00:25-01:12 | v14 30 · v22-cart-top 25 · v23-pop-log 25 · v20 20 (desde las 00:32 con alarma de conexión) | ad27e8e, 2d22000 |
+| 01:15- | v23 35 (CAMPEONA) · v24-rate 35 · v20 20 · v14 10 | 4cc2f7f |
 
 Qué es cada versión:
 - **v8** (campeona nominal por decisión de tarre, y control): v6 reentrenado + señal de producto nuevo. Empatada con v6.
@@ -114,11 +115,11 @@ Otros datos útiles:
 
 | # | Idea | Estado |
 |---|---|---|
-| A | Ronda 6 (desde las 00:25): **v22-cart-top** frente a v14 (mismos pesos; con conocidos el mejor carrito va primero) y **v23-pop-log** frente a v20 (misma receta y datos; popularidad en escala log). Promocionar con z ≥ +2 y 3.000 requests; retirar con z ≤ -2. Si v22 gana, probar también `cart_top: "all"` (compradores nuevos incluidos) | En marcha |
-| B | Si v22 y v23 ganan, juntarlas en una (pesos de v23 + `cart_top`) y validarla como retadora | Pendiente |
-| C | Último reentreno hacia las 05:00 con la receta ganadora (`analysis/live_matrix.py --cf-fill` + `train_live.py`), como retadora con nombre nuevo. Ojo: reentrenar con 3 h más de datos no cambió nada a las 23:15; solo merece la pena si cambia la receta | Pendiente |
-| D | Ronda final (desde ~06:00): las 2 mejores al 50 % cada una | Pendiente |
-| E | Ya contestadas: pesos separados o un solo juego dan lo mismo (v13 = v14); EASE da lo mismo que el coseno en vivo (v17 = v14); las señales del evento no ayudan (v18); reentrenar no cambia (v20, v21) | Cerradas |
+| A | Ronda 7 (desde la 01:15): **v24-rate** (carritos por vista del producto) frente a v23. Promocionar con z ≥ +2 y 3.000 requests; retirar con z ≤ -2. v20 mide lo que añade `pop_log` (v23 − v20); v14 es la referencia | En marcha |
+| B | Si v24 gana o empata: versión con `rate_cart` Y `pop_log` a la vez, y probar también las tasas por separado histórico / evento | Pendiente |
+| C | Último reentreno hacia las 05:00 con la receta ganadora (`analysis/live_matrix.py --cf-fill` + `train_live.py --segment known/new`), como retadora con nombre nuevo. Reentrenar SÍ ayuda cuando hay feedback nuevo de las versiones buenas (v20: +0,20; z = +2,2) | Pendiente |
+| D | Ronda final (desde ~06:30): las 2 mejores al 50 % cada una | Pendiente |
+| E | Ya contestadas: pesos separados o un solo juego dan lo mismo (v13 = v14); EASE da lo mismo que el coseno en vivo (v17 = v14); las señales del evento no ayudan (v18); poner el mejor carrito primero no se nota (v22); cruces carrito × señales, árboles, logit condicional: sin mejora offline | Cerradas |
 | F | Descartadas esta noche tras probarlas offline: modelo de árboles, logit condicional, base del histórico sin recompras (sale igual), tabla de parecidos con eventos de hoy (sin diferencia medible), subir el peso de productos nuevos, empujar rebajas | Cerradas |
 
 ## Último despertar antes de la final (08:30-09:15)
