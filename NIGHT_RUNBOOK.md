@@ -70,7 +70,8 @@ Diario: `logs/night_report.md`. Estado: `logs/night_state.json` (campeona, retad
 | 23:20-00:23 | v14 25 · v13 20 · v20 20 · v21 20 · v17 15 (sin red 23:51-23:58 y 00:07-00:14) | 9fe5af5 |
 | 00:25-01:12 | v14 30 · v22-cart-top 25 · v23-pop-log 25 · v20 20 (desde las 00:32 con alarma de conexión) | ad27e8e, 2d22000 |
 | 01:15-01:38 | v23 35 (CAMPEONA) · v24-rate 35 · v20 20 · v14 10 | 4cc2f7f |
-| 01:40- | v23 30 · v24-rate 30 · v25-rate-nonew 30 · v20 10 | 1c8a377 |
+| 01:40-02:13 | v23 30 · v24-rate 30 · v25-rate-nonew 30 · v20 10 | 1c8a377 |
+| 02:15- | v24 30 (CAMPEONA) · v26-new2x 25 · v27-new3x 25 · v25 10 · v23 10 | 71af842 |
 
 Qué es cada versión:
 - **v8** (campeona nominal por decisión de tarre, y control): v6 reentrenado + señal de producto nuevo. Empatada con v6.
@@ -116,8 +117,8 @@ Otros datos útiles:
 
 | # | Idea | Estado |
 |---|---|---|
-| A | Ronda 8 (desde la 01:40): **v24-rate** y **v25-rate-nonew** frente a v23. v24 y v25 solo se diferencian en el empujón a productos nuevos (v25 no lo tiene), así que juntas miden la señal de tasa. Promocionar con z ≥ +2 y 3.000 requests; si las dos van parecidas, elegir v25 (los datos dicen que los productos nuevos no convierten más) | En marcha |
-| B | Reentreno final con la receta ganadora y `is_new_prod` = 0 (no calibrar con `calibrate_new.py`: poner el peso a 0 en el JSON) | Pendiente |
+| A | Ronda 9: curva de exposición a productos nuevos con los pesos de v24: v25 0,6 % · v24 6 % · v26 12 % · v27 20 %. Promocionar v26 o v27 con z ≥ +2 y 3.000 requests; retirar con z ≤ -2. v25 ya va -0,40 (z = -2,8): NO quitar el empujón a los productos nuevos | En marcha |
+| B | Reentreno final con la receta de v24 (`--drop cart_no_buy,viewed_no_cart,organic,on_sale,cart_live,view_live,pop_log,rate_buy`), y `is_new_prod` calibrado con `analysis/calibrate_new.py vNN --factor F` al nivel de exposición que gane la curva (F = 1 es v24, 2 es v26, 3.5 es v27) | Pendiente |
 | C | Último reentreno hacia las 05:00 con la receta ganadora (`analysis/live_matrix.py --cf-fill` + `train_live.py --segment known/new`), como retadora con nombre nuevo. Reentrenar SÍ ayuda cuando hay feedback nuevo de las versiones buenas (v20: +0,20; z = +2,2) | Pendiente |
 | D | Ronda final (desde ~06:30): las 2 mejores al 50 % cada una | Pendiente |
 | E | Ya contestadas: pesos separados o un solo juego dan lo mismo (v13 = v14); EASE da lo mismo que el coseno en vivo (v17 = v14); las señales del evento no ayudan (v18); poner el mejor carrito primero no se nota (v22); cruces carrito × señales, árboles, logit condicional: sin mejora offline | Cerradas |
