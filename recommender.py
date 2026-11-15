@@ -67,16 +67,16 @@ DRY_RUN = "--dry-run" in sys.argv
 VARIANTS: dict[str, int] = {
     # Noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12: esta noche el tráfico se
     # reparte para APRENDER qué versión es la mejor.
-    "v14-cf-split": 30,     # CAMPEONA desde las 22:28: parecido entre productos + pesos distintos para nuevos y conocidos
-    "v22-cart-top": 25,     # v14 (mismos pesos) + con compradores conocidos, su mejor producto del carrito va el primero
-    "v23-pop-log": 25,      # receta de v14 reentrenada a las 23:15 + popularidad en escala logarítmica
-    "v20-split-retrain": 20,   # receta de v14 reentrenada a las 23:15 (sin más): control de v23 y prueba del reentreno
+    "v23-pop-log": 35,      # CAMPEONA desde la 01:15: receta de v14 reentrenada a las 23:15 + popularidad en escala
+                            # logarítmica. +0,38 sobre v14 (z = +3,3; 2.171 requests)
+    "v24-rate": 35,         # receta de v14 reentrenada a la 01:05 + carritos por cada vista del producto (rate_cart)
+    "v20-split-retrain": 20,   # como v23 sin pop_log: +0,20 sobre v14 (z = +2,2; 3.506 requests). Mide lo que añade pop_log
+    "v14-cf-split": 10,     # campeona anterior, como referencia de cuánto se ha ganado
     # Retiradas (conversión esperada del leaderboard, por tramos, frente a v14):
-    #   v13-cf-session  +0,05 (z = +0,6; 5.255 requests): empate. Un juego de pesos o dos da lo mismo
-    #   v17-ease        +0,01 (z = +0,1; 4.547 requests): empate. La tabla EASE no mejora en vivo
-    #   v21-single-retrain -0,26 (z = -1,9; 1.624 requests)
-    #   v18-live        -0,16 (z = -1,5): las señales del evento no ayudan
-    #   v8-new-products -0,31 (z = -3,6): la familia del parecido es claramente mejor
+    #   v22-cart-top    +0,05 (z = +0,4; 2.226 requests): poner el mejor carrito primero no se nota. Se puede
+    #                   volver a probar sobre la campeona final si sobra tráfico
+    #   v13-cf-session  +0,02 (z = +0,2; 5.486 requests) y v17-ease +0,02 (z = +0,2; 4.720 requests): empates
+    #   v21-single-retrain -0,23 (z = -1,9) · v18-live -0,16 (z = -1,5) · v8-new-products -0,31 (z = -3,6)
     #   v12-cf, v6, v9-organic, v10-sale, v5-cart-first, v4, v7-explore: ver logs/night_report.md
 }
 
@@ -251,6 +251,42 @@ def score_counts(rows: list[Record]) -> dict[str, float]:
     return {r["product_id"]: 3 * float(r["buys"]) + 1 * float(r["carts"]) + 0.05 * float(r["views"]) for r in rows}
 
 
+RATE_K = 30.0            # suavizado de las tasas: 30 vistas "de regalo" con la tasa media
+_COUNTS: dict[str, dict] = {}   # últimos conteos por producto que se pudieron leer ("hist" y "live")
+
+
+def product_counts(table: str) -> dict[str, tuple[float, float, float]]:
+    """Vistas, carritos y compras de cada producto en toda la tabla (una fila por producto)."""
+    return {r["product_id"]: (float(r["views"]), float(r["carts"]), float(r["buys"]))
+            for r in query(POPULARITY.format(table=table, where="1 = 1"), timeout=120)}
+
+
+def product_rates() -> dict[str, tuple[float, float]]:
+    """Por producto: log de (compras por vista) y de (carritos por vista), relativo a la media y suavizado.
+
+    Junta los 60 días del histórico (se lee una vez y se guarda en cache/) con todo lo ocurrido en el evento
+    (se relee en cada refresco: así los productos nuevos tienen su tasa en cuanto acumulan vistas). Si una
+    lectura falla se usa la última buena. Un producto sin datos queda en 0 = la media."""
+    if "hist" not in _COUNTS:
+        path = CACHE / "hist_counts.json"
+        if path.exists():
+            _COUNTS["hist"] = {p: tuple(v) for p, v in json.loads(path.read_text()).items()}
+        else:
+            _COUNTS["hist"] = product_counts("shop.history_events")
+            path.parent.mkdir(exist_ok=True)
+            path.write_text(json.dumps(_COUNTS["hist"]))
+    try:
+        _COUNTS["live"] = product_counts("shop.events")
+    except Exception as e:
+        print(f"conteos del evento no disponibles, sigo con los anteriores: {e}")
+    hist, live = _COUNTS["hist"], _COUNTS.get("live", {})
+    tot = {p: tuple(a + b for a, b in zip(hist.get(p, (0, 0, 0)), live.get(p, (0, 0, 0)))) for p in set(hist) | set(live)}
+    views = sum(t[0] for t in tot.values()) or 1.0
+    r_cart, r_buy = sum(t[1] for t in tot.values()) / views or 1e-6, sum(t[2] for t in tot.values()) / views or 1e-6
+    return {p: (math.log((b + RATE_K * r_buy) / (v + RATE_K) / r_buy), math.log((a + RATE_K * r_cart) / (v + RATE_K) / r_cart))
+            for p, (v, a, b) in tot.items()}
+
+
 def hist_popularity(until: str | None = None) -> dict[str, float]:
     """Popularidad de cada producto en los últimos 14 días del histórico."""
     return score_counts(query(POPULARITY.format(table="shop.history_events", where=window(14, until)), timeout=300))
@@ -298,7 +334,7 @@ def fair_new_popularity(pop: dict[str, float], hist_pop: dict[str, float], live_
 
 def make_state(product: dict[str, Record], available: set[str], hist_pop: dict[str, float],
                live_pop: dict[str, float], new_age: dict[str, float] | None = None, mf: dict | None = None,
-               cf: dict | None = None) -> State:
+               cf: dict | None = None, rates: dict | None = None) -> State:
     """Ordena el catálogo por popularidad: histórico + última hora (que pesa x2: tendencias)."""
     # log1p para que los superventas no lo aplasten todo
     pop = {p: math.log1p(hist_pop.get(p, 0)) + 2 * math.log1p(live_pop.get(p, 0)) for p in product}
@@ -315,7 +351,7 @@ def make_state(product: dict[str, Record], available: set[str], hist_pop: dict[s
         if len(by_sub[info["subcategory"]]) < 30:
             by_sub[info["subcategory"]].append(p)
     s.top_by_cat, s.top_by_subcat = dict(by_cat), dict(by_sub)
-    s.items = Items(product, pop, available, mf, cf)
+    s.items = Items(product, pop, available, mf, cf, rates)
     return s
 
 
@@ -347,7 +383,12 @@ def build_state(hist_pop: dict[str, float], mf: dict | None = None, cf: dict | N
         new_age = {r["product_id"]: float(r["age_min"]) for r in query(NEW_PRODUCTS)}
     except Exception:
         new_age = {}
-    return make_state(product, available, hist_pop, live, new_age, mf, cf)
+    try:
+        rates = product_rates()
+    except Exception as e:   # sin tasas las versiones v24+ pierden esa señal, pero todo sigue funcionando
+        print(f"tasas por producto no disponibles: {e}")
+        rates = None
+    return make_state(product, available, hist_pop, live, new_age, mf, cf, rates)
 
 
 # --------------------------------------------------------------------------- modelos

@@ -63,6 +63,10 @@ FEATURES = [
     "pop_log",         # popularidad en escala logarítmica (/10). pop_glob es un puesto (0-1) y casi no distingue
                        # entre el más vendido y el nº 100, que es donde se juegan las listas (el top 1 % se compra
                        # ~5 veces más que el resto del top 10 % a igual puesto, analysis/cart_age.py)
+    # --- añadidas en v24 ---
+    "rate_buy",        # compras por cada vista del producto (log, suavizado, relativo a la media; histórico + evento)
+    "rate_cart",       # carritos por cada vista. En un carrusel todos los productos "se ven" igual: importa más
+                       # cuánto convence el producto cuando se ve que cuánto se vende (analysis/pop_forms.py)
 ]
 K = len(FEATURES)
 FI = {name: i for i, name in enumerate(FEATURES)}
@@ -190,7 +194,7 @@ class Items:
     """El catálogo como columnas numéricas alineadas con PRODUCTS. Se reconstruye en cada refresco."""
 
     def __init__(self, product: dict[str, dict], popularity: dict[str, float], available: set[str],
-                 mf: dict | None = None, cf: dict | None = None):
+                 mf: dict | None = None, cf: dict | None = None, rates: dict[str, tuple[float, float]] | None = None):
         for pid, info in product.items():
             PRODUCTS.add(pid), SUBS.add(info["subcategory"]), CATS.add(info["category"]), BRANDS.add(info.get("brand") or "")
         n = self.n = len(PRODUCTS)
@@ -232,6 +236,11 @@ class Items:
         self.static = np.stack([1 / np.sqrt(rank_sub), 1 - rank_glob / n, np.log(price)], axis=1).astype(np.float32)
         self.pop = pop
         self.pop_log = (pop / 10).astype(np.float32)
+        self.rate = np.zeros((n, 2), np.float32)   # tasa de compra y de carrito por vista (0 = la media)
+        for pid, r in (rates or {}).items():
+            i = PRODUCTS.idx.get(pid)
+            if i is not None:
+                self.rate[i] = r
         # Tablas de parecidos: `cf` es una sola (la de siempre) o un diccionario nombre -> tabla (ver cf_tables)
         tables = {} if cf is None else ({"": cf} if "products" in cf else cf)
         self.cfs = {name: CFTable(t, self, name) for name, t in tables.items()}
@@ -425,6 +434,8 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
     F = np.zeros((n, K), np.float32)
     F[:, STATIC] = items.static
     F[:, FI["pop_log"]] = items.pop_log
+    F[:, FI["rate_buy"]] = items.rate[:, 0]
+    F[:, FI["rate_cart"]] = items.rate[:, 1]
     F[:, FI["is_new_prod"]] = items.is_new
     F[:, FI["on_sale"]] = items.on_sale
 
