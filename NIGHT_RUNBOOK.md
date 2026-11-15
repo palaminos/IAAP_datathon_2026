@@ -73,7 +73,8 @@ Diario: `logs/night_report.md`. Estado: `logs/night_state.json` (campeona, retad
 | 01:40-02:13 | v23 30 · v24-rate 30 · v25-rate-nonew 30 · v20 10 | 1c8a377 |
 | 02:15-02:33 | v24 30 (CAMPEONA) · v26-new2x 25 · v27-new3x 25 · v25 10 · v23 10 | 71af842 |
 | 02:35-03:04 | v24 25 · v26 25 · v27 25 · v28-rate-learned 25 (curva de productos nuevos: 7 % · 13 % · 21 % · 32 %) | f9a0f69 |
-| 03:05- | v24 34 (CAMPEONA) · v29-rate-retrain 33 · v31-rate-known 33 | 3433ddb |
+| 03:05-03:47 | v24 34 (CAMPEONA) · v29-rate-retrain 33 · v31-rate-known 33 | 3433ddb |
+| 03:50- | v24 50 · v32-carousel-hist 50 | 6016e23 |
 
 Qué es cada versión:
 - **v8** (campeona nominal por decisión de tarre, y control): v6 reentrenado + señal de producto nuevo. Empatada con v6.
@@ -119,7 +120,8 @@ Otros datos útiles:
 
 | # | Idea | Estado |
 |---|---|---|
-| A | Ronda 11 (desde las 03:05): **v29** (receta de v24 reentrenada a las 03:00) y **v31** (v29 con `rate_cart` = 1,0 para conocidos) frente a v24. Promocionar con z ≥ +2 y 3.000 requests; retirar con z ≤ -2. No leer nada con menos de ~2.000 requests | En marcha |
+| A | Ronda 12 (desde las 03:50): **v32-carousel-hist** (receta de v24 + historial de cada comprador en los carruseles antiguos, `hc_*`) frente a v24, 50/50. Promocionar con z ≥ +2 y 3.000 requests; retirar con z ≤ -2. Si gana: reentreno final con esas señales. Si empata: quedarse con v24 | En marcha |
+| A2 | Ideas siguientes para compradores conocidos (es donde nos ganan: 1,4-1,65 % frente a 1,8-1,86 % de los mejores): cruce `hc_buy` × carrito (comprado en carrusel antiguo Y en carrito convierte 3,95 %), clics de la sesión actual, precio según dispositivo y región (coeficiente en vivo +0,53 ± 0,15) | Pendiente |
 | B | Productos nuevos: CERRADO. El empujón calibrado "como v8" (`analysis/calibrate_new.py vNN`, sin `--factor`) es el mejor nivel: sin empujón -0,19, el doble -0,21, el triple -0,23, sin recortar -0,46 | Cerrada |
 | C | Último reentreno hacia las 05:00 con la receta ganadora (`analysis/live_matrix.py --cf-fill` + `train_live.py --segment known/new`), como retadora con nombre nuevo. Reentrenar SÍ ayuda cuando hay feedback nuevo de las versiones buenas (v20: +0,20; z = +2,2) | Pendiente |
 | D | Ronda final (desde ~06:30): las 2 mejores al 50 % cada una | Pendiente |
