@@ -72,6 +72,8 @@ FEATURES = [
     "hc_click",        # 1 si lo clicó en un carrusel antiguo sin comprarlo (0,75 %)
     "hc_any",          # 1 si se lo enseñaron alguna vez y no lo tocó
     "hc_n",            # log(1 + veces que se lo enseñaron sin que lo tocara): 1 vez 0,47 %, 4 o más 0,22 %
+    # --- añadida en v33 ---
+    "hs_views",        # log(1 + sesiones antiguas en que vio el producto, máx. 3): ninguna 0,18 %, 1 sesión 0,41 %, 2-3 sesiones 0,70 %
 ]
 K = len(FEATURES)
 FI = {name: i for i, name in enumerate(FEATURES)}
@@ -284,6 +286,7 @@ class UserStore:
         self.prod: dict[int, dict[int, int]] = {}   # fila de usuario -> {producto: contadores empaquetados}
         self.live: dict[int, dict[int, int]] = {}   # lo mismo, pero solo con lo ocurrido durante el evento (shop.events)
         self.hc: tuple | None = None                # historial en los carruseles antiguos: (indptr, productos, contadores)
+        self.hs: tuple | None = None                # sesiones antiguas en que vio cada producto: (indptr, productos, nº)
         self.watermark = ""                          # último ts de shop.events ya incorporado
         self.mf: np.ndarray | None = None            # factores de "usuarios parecidos" por usuario
 
@@ -373,20 +376,16 @@ class UserStore:
                             if c is not None:
                                 self._bump(m, r, c, int(n))
 
-    def load_hist_carousel(self, query: Callable[..., list[dict]], path: Path, chunks: int = 16) -> None:
-        """Lo que cada comprador hizo en los carruseles del sistema antiguo (shop.history_sessions): cuántas veces se le
-        enseñó cada producto, cuántas lo clicó y cuántas lo compró. Son ~10 M de pares; se bajan una vez, en trozos
-        pequeños y de uno en uno (no cargar la red de producción), y se guardan en `path`.
-
-        Ojo: una compra hecha desde un carrusel antiguo NO cuenta como "ya comprado" (eso solo lo son las compras de
-        shop.history_events y las del evento): al revés, es la mejor señal de que lo volverá a comprar."""
+    def _load_pairs(self, query: Callable[..., list[dict]], sql: str, path: Path, chunks: int) -> tuple:
+        """Baja (o lee de `path`) una tabla comprador × producto con un contador, en trozos pequeños y de uno en uno
+        para no cargar la red de producción, y la deja ordenada por fila de comprador: (indptr, productos, contadores)."""
         if path.exists():
             d = np.load(path)
             u, cnt, names, p, v = d["u"], d["cnt"], d["names"], d["p"], d["v"]
         else:
             us, cnts, ps, vs, name_idx = [], [], [], [], {}
             for i in range(chunks):
-                for r in query(HIST_CAROUSEL.format(chunks=chunks, i=i), timeout=300):
+                for r in query(sql.format(chunks=chunks, i=i), timeout=300):
                     us.append(r["u"]); cnts.append(len(r["p"]))
                     ps.extend(name_idx.setdefault(x, len(name_idx)) for x in r["p"])
                     vs.extend(int(x) for x in r["v"])
@@ -401,7 +400,20 @@ class UserStore:
         rows, idx, v = rows[ok], idx[ok], v[ok]
         order = np.argsort(rows, kind="stable")
         indptr = np.concatenate([[0], np.cumsum(np.bincount(rows, minlength=int(rows.max()) + 1 if len(rows) else 1))])
-        self.hc = (indptr, idx[order].astype(np.int32), v[order])
+        return indptr, idx[order].astype(np.int32), v[order]
+
+    def load_hist_carousel(self, query: Callable[..., list[dict]], path: Path, chunks: int = 16) -> None:
+        """Lo que cada comprador hizo en los carruseles del sistema antiguo (shop.history_sessions): cuántas veces se le
+        enseñó cada producto, cuántas lo clicó y cuántas lo compró (~10 M de pares; se guardan en `path`).
+
+        Ojo: una compra hecha desde un carrusel antiguo NO cuenta como "ya comprado" (eso solo lo son las compras de
+        shop.history_events y las del evento): al revés, es la mejor señal de que lo volverá a comprar."""
+        self.hc = self._load_pairs(query, HIST_CAROUSEL, path, chunks)
+
+    def load_hist_views(self, query: Callable[..., list[dict]], path: Path, chunks: int = 8) -> None:
+        """En cuántas sesiones antiguas vio el comprador cada producto (los recent_views de las requests del histórico,
+        que NO están en shop.history_events). Visto en 2-3 sesiones: se compra 3,5 veces más."""
+        self.hs = self._load_pairs(query, HIST_VIEWS, path, chunks)
 
     def save(self, path: Path) -> None:
         n = len(self.row)
@@ -444,6 +456,15 @@ SELECT u, groupArray(p) AS p, groupArray(v) AS v FROM (
            least(count(), 4095) + bitShiftLeft(least(countIf(clicked::String = p), 4095), 12)
            + bitShiftLeft(least(countIf(purchased::String = p), 255), 24) AS v
     FROM shop.history_sessions ARRAY JOIN shown::Array(String) AS p
+    WHERE cityHash64(user_id::String) % {chunks} = {i}
+    GROUP BY u, p
+) GROUP BY u"""
+
+# Por comprador: en cuántas requests del histórico aparecía cada producto entre sus recent_views
+HIST_VIEWS = """
+SELECT u, groupArray(p) AS p, groupArray(v) AS v FROM (
+    SELECT user_id::String AS u, rv.product_id::String AS p, least(count(), 4095) AS v
+    FROM shop.history_sessions ARRAY JOIN recent_views::Array(JSON) AS rv
     WHERE cityHash64(user_id::String) % {chunks} = {i}
     GROUP BY u, p
 ) GROUP BY u"""
@@ -528,6 +549,15 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
                 F[ii, FI["hc_click"]] = (clicks > 0) & (buys == 0)
                 F[ii, FI["hc_any"]] = (clicks == 0) & (buys == 0)
                 F[ii, FI["hc_n"]] = np.where(clicks == 0, np.log1p(ignored), 0.0)
+        hs = users.hs
+        if hs is not None and row < len(hs[0]) - 1:
+            a, b = hs[0][row], hs[0][row + 1]
+            if b > a:
+                ii, cnt = hs[1][a:b], hs[2][a:b]
+                if len(ii) and ii.max() >= n:
+                    ok = ii < n
+                    ii, cnt = ii[ok], cnt[ok]
+                F[ii, FI["hs_views"]] = np.log1p(np.minimum(cnt, 3))   # a partir de 3 sesiones ya no sube
         lv = users.live.get(row)
         if lv:
             for i, packed in list(lv.items()):

@@ -138,6 +138,27 @@ class Basics(unittest.TestCase):
         self.assertEqual(out[0], "p040")
         self.assertTrue(is_valid(out))
 
+    def test_old_session_views_signal(self):
+        """v33: en cuántas sesiones antiguas vio el comprador cada producto (tope en 3), solo para quien tiene historial."""
+        users = model.UserStore(capacity=8)
+        users.add_event("u1", "p030", "view", STATE.items)
+        row, P, FI = users.row["u1"], model.PRODUCTS.idx, model.FI
+        pairs = sorted([(P["p040"], 1), (P["p041"], 2), (P["p042"], 9)])
+        indptr = np.zeros(row + 2, np.int64)
+        indptr[row + 1:] = len(pairs)
+        users.hs = (indptr, np.array([i for i, _ in pairs], np.int32), np.array([v for _, v in pairs], np.uint32))
+        F = model.featurize("u1", [], STATE.items, users, {})
+        got = [float(F[P[p], FI["hs_views"]]) for p in ("p040", "p041", "p042", "p043")]
+        for x, y in zip(got, [np.log1p(1), np.log1p(2), np.log1p(3), 0.0]):
+            self.assertAlmostEqual(x, float(y), places=5)
+        self.assertEqual(float(model.featurize("otro", [], STATE.items, users, {})[:, FI["hs_views"]].sum()), 0.0)
+        w = np.zeros(model.K, np.float32)
+        w[FI["hs_views"]] = 5.0
+        m = rec.Models({}, {}, WEIGHTS, WEIGHTS, {"v33": w})
+        out = rec.respond({"request_id": "r1", "user_id": "u1", "recent_views": []}, "v33-x", STATE, set(), users, m)["items"]
+        self.assertEqual(out[0], "p042")
+        self.assertTrue(is_valid(out))
+
     def test_alarm_only_during_the_final_and_after_30s(self):
         import datetime as dt
         inside = dt.datetime.strptime(rec.ALARM_WINDOW[0], "%Y-%m-%d %H:%M").timestamp() + 600

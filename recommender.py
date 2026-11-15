@@ -68,8 +68,12 @@ VARIANTS: dict[str, int] = {
     # Noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12: esta noche el tráfico se
     # reparte para APRENDER qué versión es la mejor.
     "v24-rate": 50,          # CAMPEONA desde las 02:13: receta de v14 reentrenada a la 01:05 + rate_cart
-    "v32-carousel-hist": 50, # receta de v24 reentrenada a las 03:40 + lo que cada comprador hizo en los carruseles antiguos
+    "v33-user-history": 50,  # v32 + en cuántas sesiones antiguas vio el comprador cada producto (hs_views); reentrenada a
+                             # las 04:25. Para compradores nuevos usa EXACTAMENTE los pesos de v24 (v33n = v24n)
     # Retiradas (conversión esperada del leaderboard, por tramos, frente a v24):
+    #   v32-carousel-hist (03:50-04:30, ~2.500 requests): con compradores conocidos +0,02 (empate); el -0,87 en cold es
+    #                    ruido (sus listas para compradores nuevos coinciden con las de v24 en 9,3 de 10 productos). Sus
+    #                    señales siguen dentro de v33
     #   v29-rate-retrain -0,03 (z = -0,3; 2.088 requests) y v31-rate-known +0,07 (z = +0,6; 2.073 requests): empates.
     #                    Reentrenar a las 03:00 o dar más peso a rate_cart con conocidos no cambia nada
     #   Curva de productos nuevos: v25 0,6 % de los huecos -0,19 · v26 13 % -0,15 · v27 21 % -0,14 · v28 32 % -0,46
@@ -555,7 +559,9 @@ class Background:
         try:   # después de avisar de que la memoria está lista: esto tarda ~1 min la primera vez y no debe retrasar nada
             t = time.time()
             self.users.load_hist_carousel(query, CACHE / "hist_carousel_users.npz")
-            print(f"historial de los carruseles antiguos listo en {time.time() - t:.0f}s: {len(self.users.hc[1])} pares comprador-producto")
+            self.users.load_hist_views(query, CACHE / "hist_views_users.npz")
+            print(f"historial de los carruseles antiguos listo en {time.time() - t:.0f}s: {len(self.users.hc[1])} pares comprador-producto "
+                  f"y {len(self.users.hs[1])} de sesiones antiguas")
         except Exception as e:
             print(f"historial de los carruseles antiguos no disponible ({e}); las versiones v32+ irán sin esa señal")
         print(f"memoria de usuarios lista en {time.time() - t:.0f}s: {n_hist} con historial, "

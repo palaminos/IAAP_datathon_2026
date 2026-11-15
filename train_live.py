@@ -80,6 +80,7 @@ def live_examples():
     users.load_file(rec.CACHE / "users_history_v2.pkl")
     users.init_mf(mf)
     users.load_hist_carousel(rec.query, rec.CACHE / "hist_carousel_users.npz")
+    users.load_hist_views(rec.query, rec.CACHE / "hist_views_users.npz")
     cov_idx = model.index_coviews(rec.load_coviews())
     reqs = sorted((r for i in range(4) for r in rec.query(LIVE.format(team=rec.TEAM, i=i), timeout=300)), key=lambda r: int(r["ms"]))
     reqs = [r for r in reqs if len(r["shown"]) == 10 and all(p in model.PRODUCTS.idx for p in r["shown"])]
@@ -87,7 +88,7 @@ def live_examples():
     start = dt.datetime.fromisoformat(rec.query("SELECT toString(toStartOfHour(min(ts::DateTime64(3)))) AS d FROM shop.events")[0]["d"])
     hour, events, e = start, [], 0
     X, slot, click, buy, when, explored = [], [], [], [], [], []
-    meta: dict[str, list] = {"new": [], "page": [], "version": [], "prod": []}
+    meta: dict[str, list] = {"new": [], "page": [], "version": [], "prod": [], "urow": []}
     # Rebajas: si cada producto mostrado estaba rebajado EN EL MOMENTO de la request (no ahora)
     changes: dict[str, tuple[list, list]] = {}
     try:
@@ -129,6 +130,7 @@ def live_examples():
         meta["page"].append(np.full(10, r.get("page") or ""))
         meta["version"].append(np.full(10, r.get("version") or ""))
         meta["prod"].append(np.array(idx))
+        meta["urow"].append(np.full(10, users.row.get(r["u"], -1), np.int32))   # fila del comprador en UserStore (-1: sin memoria)
         click.append([p == r["clicked"] for p in r["shown"]]), buy.append([p == r["purchased"] for p in r["shown"]])
         if r["purchased"]:  # lo comprado en nuestro carrusel también entra en la memoria
             users.add_event(r["u"], r["purchased"], "purchase", items)
