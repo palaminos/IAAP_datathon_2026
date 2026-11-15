@@ -72,7 +72,7 @@ VARIANTS: dict[str, int] = {
 # v7-explore sigue sobre v9 a propósito: v9 como modelo pierde (1,20 % frente a 1,46 % de v6), pero SORTEAR
 # entre sus 40 mejores da 1,54 %, lo mejor que tenemos. Se compara con el mismo sorteo sobre v6 para saber
 # si lo bueno es el sorteo en sí o los candidatos de v9.
-EXPLORE = {"v7-explore": "v9", "v7b-explore-v6": "v6"}
+EXPLORE = {"v7-explore": "v33"}   # variante de exploración (el sábado se usó con los pesos de entonces)
 EXPLORE_TOP = 40         # candidatos entre los que se sortea
 EXPLORE_T = 1.0          # temperatura: 1 = cada candidato sale en proporción a su probabilidad estimada de compra
 EXPLORE_DRAWS = 300      # sorteos extra para estimar la probabilidad de cada producto en cada puesto
