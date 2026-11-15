@@ -71,7 +71,8 @@ Diario: `logs/night_report.md`. Estado: `logs/night_state.json` (campeona, retad
 | 00:25-01:12 | v14 30 · v22-cart-top 25 · v23-pop-log 25 · v20 20 (desde las 00:32 con alarma de conexión) | ad27e8e, 2d22000 |
 | 01:15-01:38 | v23 35 (CAMPEONA) · v24-rate 35 · v20 20 · v14 10 | 4cc2f7f |
 | 01:40-02:13 | v23 30 · v24-rate 30 · v25-rate-nonew 30 · v20 10 | 1c8a377 |
-| 02:15- | v24 30 (CAMPEONA) · v26-new2x 25 · v27-new3x 25 · v25 10 · v23 10 | 71af842 |
+| 02:15-02:33 | v24 30 (CAMPEONA) · v26-new2x 25 · v27-new3x 25 · v25 10 · v23 10 | 71af842 |
+| 02:35- | v24 25 · v26 25 · v27 25 · v28-rate-learned 25 (curva de productos nuevos: 7 % · 13 % · 21 % · 32 %) | f9a0f69 |
 
 Qué es cada versión:
 - **v8** (campeona nominal por decisión de tarre, y control): v6 reentrenado + señal de producto nuevo. Empatada con v6.
@@ -117,7 +118,7 @@ Otros datos útiles:
 
 | # | Idea | Estado |
 |---|---|---|
-| A | Ronda 9: curva de exposición a productos nuevos con los pesos de v24: v25 0,6 % · v24 6 % · v26 12 % · v27 20 %. Promocionar v26 o v27 con z ≥ +2 y 3.000 requests; retirar con z ≤ -2. v25 ya va -0,40 (z = -2,8): NO quitar el empujón a los productos nuevos | En marcha |
+| A | Ronda 10: curva de exposición a productos nuevos con los pesos de v24: v24 7 % de los huecos · v26 13 % · v27 21 % · v28 32 % (peso aprendido sin recortar). Sin empujón (v25) pierde 0,2-0,4. Promocionar el mejor nivel con z ≥ +2 y 3.000 requests; retirar con z ≤ -2. Si v28 gana a v27, el techo está aún más arriba: probar factor mayor | En marcha |
 | B | Reentreno final con la receta de v24 (`--drop cart_no_buy,viewed_no_cart,organic,on_sale,cart_live,view_live,pop_log,rate_buy`), y `is_new_prod` calibrado con `analysis/calibrate_new.py vNN --factor F` al nivel de exposición que gane la curva (F = 1 es v24, 2 es v26, 3.5 es v27) | Pendiente |
 | C | Último reentreno hacia las 05:00 con la receta ganadora (`analysis/live_matrix.py --cf-fill` + `train_live.py --segment known/new`), como retadora con nombre nuevo. Reentrenar SÍ ayuda cuando hay feedback nuevo de las versiones buenas (v20: +0,20; z = +2,2) | Pendiente |
 | D | Ronda final (desde ~06:30): las 2 mejores al 50 % cada una | Pendiente |
