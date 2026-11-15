@@ -3,6 +3,7 @@ como la versión de referencia (por defecto v8, ~6 % de los huecos). Solo lee de
 
     python analysis/calibrate_new.py v15            # ajusta model_weights_v15.json y, si existe, _v15n.json
     python analysis/calibrate_new.py v15 --ref v8 --dry
+    python analysis/calibrate_new.py v26 --factor 2      # el doble de productos nuevos que v8
 
 Por qué: el peso que aprende el entrenamiento para is_new_prod sale muy alto (2-3) porque los productos
 nuevos no tienen historial y el resto de señales los infravalora; usado tal cual llenaría de productos
@@ -21,6 +22,7 @@ import recommender as rec  # noqa: E402
 
 name = sys.argv[1]
 ref = sys.argv[sys.argv.index("--ref") + 1] if "--ref" in sys.argv else "v8"
+factor = float(sys.argv[sys.argv.index("--factor") + 1]) if "--factor" in sys.argv else 1.0   # 2.0 = el doble de exposición que la referencia
 bg = rec.Background(rec.hist_popularity())
 m = rec.load_models()
 bg._load_users()
@@ -40,7 +42,7 @@ def exposure(version: str, mask) -> float:
 
 split = name + "n" in m.by_version
 for key, mask, label in ([(name, ~isnew, "conocidos"), (name + "n", isnew, "nuevos")] if split else [(name, np.ones(len(reqs), bool), "todos")]):
-    target = exposure(ref, mask)
+    target = factor * exposure(ref, mask)
     lo, hi = -1.0, 3.0
     for _ in range(9):                      # bisección: la exposición crece con el peso
         mid = (lo + hi) / 2

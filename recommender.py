@@ -67,16 +67,17 @@ DRY_RUN = "--dry-run" in sys.argv
 VARIANTS: dict[str, int] = {
     # Noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12: esta noche el tráfico se
     # reparte para APRENDER qué versión es la mejor.
-    "v23-pop-log": 30,      # CAMPEONA desde la 01:12: receta de v14 reentrenada a las 23:15 + popularidad en escala
-                            # logarítmica. +0,24 sobre v14 (z = +2,4; 5.516 requests)
-    "v24-rate": 30,         # receta de v14 reentrenada a la 01:05 + carritos por cada vista del producto (rate_cart)
-    "v25-rate-nonew": 30,   # v24 sin empujón a los productos nuevos (is_new_prod = 0): no convierten más que los antiguos
-    "v20-split-retrain": 10,   # como v23 sin pop_log: mide lo que añade pop_log
+    "v24-rate": 30,         # CAMPEONA desde las 02:20: receta de v14 reentrenada a la 01:05 + carritos por cada vista
+                            # del producto (rate_cart). +0,32 sobre v23 (z = +3,3; 3.353 requests)
+    "v26-rate-new2x": 25,   # v24 enseñando el doble de productos nuevos (12 % de los huecos en vez de 6 %)
+    "v27-rate-new3x": 25,   # v24 enseñando 3,5 veces más productos nuevos (20 % de los huecos)
+    "v25-rate-nonew": 10,   # v24 sin empujón a los productos nuevos (0,6 %): -0,40 frente a v24 (z = -2,8) en 30 min.
+                            # Sigue con poco tráfico para afinar la medida: con v24, v26 y v27 da la curva completa
+    "v23-pop-log": 10,      # campeona anterior, como referencia
     # Retiradas (conversión esperada del leaderboard, por tramos):
-    #   v14-cf-split    -0,24 frente a v23 (z = -2,4; 5.516 requests): superada por su versión reentrenada
-    #   v22-cart-top    +0,05 frente a v14 (z = +0,4): poner el mejor carrito primero no se nota
-    #   v13-cf-session y v17-ease: empate con v14 · v21, v18, v8: por debajo
-    #   v12-cf, v6, v9-organic, v10-sale, v5-cart-first, v4, v7-explore: ver logs/night_report.md
+    #   v20-split-retrain -0,01 frente a v23 (z = -0,1; 5.060 requests): pop_log no añade nada
+    #   v14-cf-split    -0,20 frente a v23 (z = -2,1) · v22-cart-top: no se nota · v13 y v17: empate con v14
+    #   v21, v18, v8, v12, v6, v9-organic, v10-sale, v5-cart-first, v4, v7-explore: ver logs/night_report.md
 }
 
 # Exploración: variante -> versión de cuyas puntuaciones parte el sorteo.
