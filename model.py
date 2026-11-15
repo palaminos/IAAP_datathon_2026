@@ -67,6 +67,11 @@ FEATURES = [
     "rate_buy",        # compras por cada vista del producto (log, suavizado, relativo a la media; histórico + evento)
     "rate_cart",       # carritos por cada vista. En un carrusel todos los productos "se ven" igual: importa más
                        # cuánto convence el producto cuando se ve que cuánto se vende (analysis/pop_forms.py)
+    # --- añadidas en v32: lo que ESTE comprador hizo con el producto en los carruseles del histórico ---
+    "hc_buy",          # 1 si ya lo compró desde un carrusel del sistema antiguo (se vuelve a comprar el 3,7 % en puestos 1-3)
+    "hc_click",        # 1 si lo clicó en un carrusel antiguo sin comprarlo (0,75 %)
+    "hc_any",          # 1 si se lo enseñaron alguna vez y no lo tocó
+    "hc_n",            # log(1 + veces que se lo enseñaron sin que lo tocara): 1 vez 0,47 %, 4 o más 0,22 %
 ]
 K = len(FEATURES)
 FI = {name: i for i, name in enumerate(FEATURES)}
@@ -278,6 +283,7 @@ class UserStore:
         self.brand = np.zeros((capacity, cols), np.uint16)
         self.prod: dict[int, dict[int, int]] = {}   # fila de usuario -> {producto: contadores empaquetados}
         self.live: dict[int, dict[int, int]] = {}   # lo mismo, pero solo con lo ocurrido durante el evento (shop.events)
+        self.hc: tuple | None = None                # historial en los carruseles antiguos: (indptr, productos, contadores)
         self.watermark = ""                          # último ts de shop.events ya incorporado
         self.mf: np.ndarray | None = None            # factores de "usuarios parecidos" por usuario
 
@@ -367,6 +373,36 @@ class UserStore:
                             if c is not None:
                                 self._bump(m, r, c, int(n))
 
+    def load_hist_carousel(self, query: Callable[..., list[dict]], path: Path, chunks: int = 16) -> None:
+        """Lo que cada comprador hizo en los carruseles del sistema antiguo (shop.history_sessions): cuántas veces se le
+        enseñó cada producto, cuántas lo clicó y cuántas lo compró. Son ~10 M de pares; se bajan una vez, en trozos
+        pequeños y de uno en uno (no cargar la red de producción), y se guardan en `path`.
+
+        Ojo: una compra hecha desde un carrusel antiguo NO cuenta como "ya comprado" (eso solo lo son las compras de
+        shop.history_events y las del evento): al revés, es la mejor señal de que lo volverá a comprar."""
+        if path.exists():
+            d = np.load(path)
+            u, cnt, names, p, v = d["u"], d["cnt"], d["names"], d["p"], d["v"]
+        else:
+            us, cnts, ps, vs, name_idx = [], [], [], [], {}
+            for i in range(chunks):
+                for r in query(HIST_CAROUSEL.format(chunks=chunks, i=i), timeout=300):
+                    us.append(r["u"]); cnts.append(len(r["p"]))
+                    ps.extend(name_idx.setdefault(x, len(name_idx)) for x in r["p"])
+                    vs.extend(int(x) for x in r["v"])
+            u, cnt, names = np.array(us), np.array(cnts, np.int32), np.array(list(name_idx))
+            p, v = np.array(ps, np.int32), np.array(vs, np.uint32)
+            path.parent.mkdir(exist_ok=True)
+            np.savez_compressed(path, u=u, cnt=cnt, names=names, p=p, v=v)
+        lookup = np.array([PRODUCTS.idx.get(x, -1) for x in names.tolist()], np.int64)
+        rows = np.repeat(np.array([self._row(x) for x in u.tolist()], np.int64), cnt)
+        idx = lookup[p]
+        ok = idx >= 0
+        rows, idx, v = rows[ok], idx[ok], v[ok]
+        order = np.argsort(rows, kind="stable")
+        indptr = np.concatenate([[0], np.cumsum(np.bincount(rows, minlength=int(rows.max()) + 1 if len(rows) else 1))])
+        self.hc = (indptr, idx[order].astype(np.int32), v[order])
+
     def save(self, path: Path) -> None:
         n = len(self.row)
         path.parent.mkdir(exist_ok=True)
@@ -399,6 +435,18 @@ CAT_NOW = """(SELECT p, argMax(sub, v) AS sub, argMax(brand, v) AS brand FROM (
     UNION ALL
     SELECT product_id::String, subcategory::String, brand::String, toString(ts::DateTime64(3)) FROM shop.catalog_updates
   ) GROUP BY p)"""
+
+# Por comprador: cada producto que se le enseñó en un carrusel del histórico, con un contador empaquetado:
+# veces enseñado (12 bits) | veces clicado (12 bits) | veces comprado (8 bits)
+HIST_CAROUSEL = """
+SELECT u, groupArray(p) AS p, groupArray(v) AS v FROM (
+    SELECT user_id::String AS u, p,
+           least(count(), 4095) + bitShiftLeft(least(countIf(clicked::String = p), 4095), 12)
+           + bitShiftLeft(least(countIf(purchased::String = p), 255), 24) AS v
+    FROM shop.history_sessions ARRAY JOIN shown::Array(String) AS p
+    WHERE cityHash64(user_id::String) % {chunks} = {i}
+    GROUP BY u, p
+) GROUP BY u"""
 
 # Por usuario: nº de eventos en cada subcategoría (dim=sub) o marca (dim=brand)
 USER_DIM = """
@@ -466,6 +514,20 @@ def featurize(user_id: str, recent_views: list[dict] | None, items: Items, users
                 seen_only = [i for i, packed in list(mine.items()) if i < n and not ((packed >> 20) & MASK or packed >> 40)]
                 if seen_only:
                     F[:, FI["cf_view"]] = np.log1p(t.scale * cf_sum(items, t, seen_only, cf_fill))
+        hc = users.hc
+        if hc is not None and row < len(hc[0]) - 1:
+            a, b = hc[0][row], hc[0][row + 1]
+            if b > a:
+                ii, pk = hc[1][a:b], hc[2][a:b]
+                if len(ii) and ii.max() >= n:      # un producto que este catálogo aún no conoce
+                    ok = ii < n
+                    ii, pk = ii[ok], pk[ok]
+                shown, clicks, buys = pk & 0xFFF, (pk >> 12) & 0xFFF, pk >> 24
+                ignored = np.maximum(shown.astype(np.int64) - clicks, 0)
+                F[ii, FI["hc_buy"]] = buys > 0
+                F[ii, FI["hc_click"]] = (clicks > 0) & (buys == 0)
+                F[ii, FI["hc_any"]] = (clicks == 0) & (buys == 0)
+                F[ii, FI["hc_n"]] = np.where(clicks == 0, np.log1p(ignored), 0.0)
         lv = users.live.get(row)
         if lv:
             for i, packed in list(lv.items()):

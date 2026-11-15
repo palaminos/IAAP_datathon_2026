@@ -553,6 +553,12 @@ class Background:
         except Exception as e:
             print(f"eventos en vivo no disponibles todavía: {e}")
         self.users_ready = True
+        try:   # después de avisar de que la memoria está lista: esto tarda ~1 min la primera vez y no debe retrasar nada
+            t = time.time()
+            self.users.load_hist_carousel(query, CACHE / "hist_carousel_users.npz")
+            print(f"historial de los carruseles antiguos listo en {time.time() - t:.0f}s: {len(self.users.hc[1])} pares comprador-producto")
+        except Exception as e:
+            print(f"historial de los carruseles antiguos no disponible ({e}); las versiones v32+ irán sin esa señal")
         print(f"memoria de usuarios lista en {time.time() - t:.0f}s: {n_hist} con historial, "
               f"{len(self.users.row)} contando los de hoy")
 

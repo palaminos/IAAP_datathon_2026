@@ -112,6 +112,32 @@ class Basics(unittest.TestCase):
         self.assertEqual(new_out[0], "p059")                           # comprador nuevo: pesos v22n y sin regla del carrito
         self.assertTrue(is_valid(new_out))
 
+    def test_old_carousel_history_signals(self):
+        """v32: lo que el comprador hizo con cada producto en los carruseles antiguos entra como señales, y una compra
+        hecha desde un carrusel antiguo NO cuenta como 'ya comprado' (al contrario: va la primera si el peso lo dice)."""
+        users = model.UserStore(capacity=8)
+        users.add_event("u1", "p030", "view", STATE.items)
+        row, P = users.row["u1"], model.PRODUCTS.idx
+        pack = lambda shown, clicks, buys: shown | (clicks << 12) | (buys << 24)
+        pairs = sorted([(P["p040"], pack(3, 1, 1)), (P["p041"], pack(2, 1, 0)), (P["p042"], pack(5, 0, 0))])
+        indptr = np.zeros(row + 2, np.int64)
+        indptr[row + 1:] = len(pairs)
+        users.hc = (indptr, np.array([i for i, _ in pairs], np.int32), np.array([v for _, v in pairs], np.uint32))
+        F = model.featurize("u1", [], STATE.items, users, {})
+        FI = model.FI
+        self.assertEqual([F[P["p040"], FI[k]] for k in ("hc_buy", "hc_click", "hc_any", "hc_n")], [1, 0, 0, 0])
+        self.assertEqual([F[P["p041"], FI[k]] for k in ("hc_buy", "hc_click", "hc_any")], [0, 1, 0])
+        self.assertEqual([F[P["p042"], FI[k]] for k in ("hc_buy", "hc_click", "hc_any")], [0, 0, 1])
+        self.assertAlmostEqual(float(F[P["p042"], FI["hc_n"]]), float(np.log1p(5)), places=5)
+        self.assertEqual(float(F[:, FI["hc_buy"]].sum() + F[:, FI["hc_click"]].sum() + F[:, FI["hc_any"]].sum()), 3.0)
+        self.assertEqual(float(model.featurize("otro", [], STATE.items, users, {})[:, FI["hc_buy"]].sum()), 0.0)   # sin historial: ceros
+        w = np.zeros(model.K, np.float32)
+        w[FI["hc_buy"]] = 5.0
+        m = rec.Models({}, {}, WEIGHTS, WEIGHTS, {"v32": w})
+        out = rec.respond({"request_id": "r1", "user_id": "u1", "recent_views": []}, "v32-x", STATE, set(), users, m)["items"]
+        self.assertEqual(out[0], "p040")
+        self.assertTrue(is_valid(out))
+
     def test_alarm_only_during_the_final_and_after_30s(self):
         import datetime as dt
         inside = dt.datetime.strptime(rec.ALARM_WINDOW[0], "%Y-%m-%d %H:%M").timestamp() + 600
