@@ -69,7 +69,8 @@ Diario: `logs/night_report.md`. Estado: `logs/night_state.json` (campeona, retad
 | 22:30-23:19 | v14 30 (CAMPEONA) · v17 25 · v13 25 · v8 10 · v18 10 | 36b8a6b |
 | 23:20-00:23 | v14 25 · v13 20 · v20 20 · v21 20 · v17 15 (sin red 23:51-23:58 y 00:07-00:14) | 9fe5af5 |
 | 00:25-01:12 | v14 30 · v22-cart-top 25 · v23-pop-log 25 · v20 20 (desde las 00:32 con alarma de conexión) | ad27e8e, 2d22000 |
-| 01:15- | v23 35 (CAMPEONA) · v24-rate 35 · v20 20 · v14 10 | 4cc2f7f |
+| 01:15-01:38 | v23 35 (CAMPEONA) · v24-rate 35 · v20 20 · v14 10 | 4cc2f7f |
+| 01:40- | v23 30 · v24-rate 30 · v25-rate-nonew 30 · v20 10 | 1c8a377 |
 
 Qué es cada versión:
 - **v8** (campeona nominal por decisión de tarre, y control): v6 reentrenado + señal de producto nuevo. Empatada con v6.
@@ -115,8 +116,8 @@ Otros datos útiles:
 
 | # | Idea | Estado |
 |---|---|---|
-| A | Ronda 7 (desde la 01:15): **v24-rate** (carritos por vista del producto) frente a v23. Promocionar con z ≥ +2 y 3.000 requests; retirar con z ≤ -2. v20 mide lo que añade `pop_log` (v23 − v20); v14 es la referencia | En marcha |
-| B | Si v24 gana o empata: versión con `rate_cart` Y `pop_log` a la vez, y probar también las tasas por separado histórico / evento | Pendiente |
+| A | Ronda 8 (desde la 01:40): **v24-rate** y **v25-rate-nonew** frente a v23. v24 y v25 solo se diferencian en el empujón a productos nuevos (v25 no lo tiene), así que juntas miden la señal de tasa. Promocionar con z ≥ +2 y 3.000 requests; si las dos van parecidas, elegir v25 (los datos dicen que los productos nuevos no convierten más) | En marcha |
+| B | Reentreno final con la receta ganadora y `is_new_prod` = 0 (no calibrar con `calibrate_new.py`: poner el peso a 0 en el JSON) | Pendiente |
 | C | Último reentreno hacia las 05:00 con la receta ganadora (`analysis/live_matrix.py --cf-fill` + `train_live.py --segment known/new`), como retadora con nombre nuevo. Reentrenar SÍ ayuda cuando hay feedback nuevo de las versiones buenas (v20: +0,20; z = +2,2) | Pendiente |
 | D | Ronda final (desde ~06:30): las 2 mejores al 50 % cada una | Pendiente |
 | E | Ya contestadas: pesos separados o un solo juego dan lo mismo (v13 = v14); EASE da lo mismo que el coseno en vivo (v17 = v14); las señales del evento no ayudan (v18); poner el mejor carrito primero no se nota (v22); cruces carrito × señales, árboles, logit condicional: sin mejora offline | Cerradas |
