@@ -72,7 +72,8 @@ Diario: `logs/night_report.md`. Estado: `logs/night_state.json` (campeona, retad
 | 01:15-01:38 | v23 35 (CAMPEONA) · v24-rate 35 · v20 20 · v14 10 | 4cc2f7f |
 | 01:40-02:13 | v23 30 · v24-rate 30 · v25-rate-nonew 30 · v20 10 | 1c8a377 |
 | 02:15-02:33 | v24 30 (CAMPEONA) · v26-new2x 25 · v27-new3x 25 · v25 10 · v23 10 | 71af842 |
-| 02:35- | v24 25 · v26 25 · v27 25 · v28-rate-learned 25 (curva de productos nuevos: 7 % · 13 % · 21 % · 32 %) | f9a0f69 |
+| 02:35-03:04 | v24 25 · v26 25 · v27 25 · v28-rate-learned 25 (curva de productos nuevos: 7 % · 13 % · 21 % · 32 %) | f9a0f69 |
+| 03:05- | v24 34 (CAMPEONA) · v29-rate-retrain 33 · v31-rate-known 33 | 3433ddb |
 
 Qué es cada versión:
 - **v8** (campeona nominal por decisión de tarre, y control): v6 reentrenado + señal de producto nuevo. Empatada con v6.
@@ -118,8 +119,8 @@ Otros datos útiles:
 
 | # | Idea | Estado |
 |---|---|---|
-| A | Ronda 10: curva de exposición a productos nuevos con los pesos de v24: v24 7 % de los huecos · v26 13 % · v27 21 % · v28 32 % (peso aprendido sin recortar). Sin empujón (v25) pierde 0,2-0,4. Promocionar el mejor nivel con z ≥ +2 y 3.000 requests; retirar con z ≤ -2. Si v28 gana a v27, el techo está aún más arriba: probar factor mayor | En marcha |
-| B | Reentreno final con la receta de v24 (`--drop cart_no_buy,viewed_no_cart,organic,on_sale,cart_live,view_live,pop_log,rate_buy`), y `is_new_prod` calibrado con `analysis/calibrate_new.py vNN --factor F` al nivel de exposición que gane la curva (F = 1 es v24, 2 es v26, 3.5 es v27) | Pendiente |
+| A | Ronda 11 (desde las 03:05): **v29** (receta de v24 reentrenada a las 03:00) y **v31** (v29 con `rate_cart` = 1,0 para conocidos) frente a v24. Promocionar con z ≥ +2 y 3.000 requests; retirar con z ≤ -2. No leer nada con menos de ~2.000 requests | En marcha |
+| B | Productos nuevos: CERRADO. El empujón calibrado "como v8" (`analysis/calibrate_new.py vNN`, sin `--factor`) es el mejor nivel: sin empujón -0,19, el doble -0,21, el triple -0,23, sin recortar -0,46 | Cerrada |
 | C | Último reentreno hacia las 05:00 con la receta ganadora (`analysis/live_matrix.py --cf-fill` + `train_live.py --segment known/new`), como retadora con nombre nuevo. Reentrenar SÍ ayuda cuando hay feedback nuevo de las versiones buenas (v20: +0,20; z = +2,2) | Pendiente |
 | D | Ronda final (desde ~06:30): las 2 mejores al 50 % cada una | Pendiente |
 | E | Ya contestadas: pesos separados o un solo juego dan lo mismo (v13 = v14); EASE da lo mismo que el coseno en vivo (v17 = v14); las señales del evento no ayudan (v18); poner el mejor carrito primero no se nota (v22); cruces carrito × señales, árboles, logit condicional: sin mejora offline | Cerradas |
