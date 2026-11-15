@@ -67,16 +67,15 @@ DRY_RUN = "--dry-run" in sys.argv
 VARIANTS: dict[str, int] = {
     # Noche del sábado (ver NIGHT_RUNBOOK.md). Solo puntúa el domingo de 10 a 12: esta noche el tráfico se
     # reparte para APRENDER qué versión es la mejor.
-    "v23-pop-log": 35,      # CAMPEONA desde la 01:15: receta de v14 reentrenada a las 23:15 + popularidad en escala
-                            # logarítmica. +0,38 sobre v14 (z = +3,3; 2.171 requests)
-    "v24-rate": 35,         # receta de v14 reentrenada a la 01:05 + carritos por cada vista del producto (rate_cart)
-    "v20-split-retrain": 20,   # como v23 sin pop_log: +0,20 sobre v14 (z = +2,2; 3.506 requests). Mide lo que añade pop_log
-    "v14-cf-split": 10,     # campeona anterior, como referencia de cuánto se ha ganado
-    # Retiradas (conversión esperada del leaderboard, por tramos, frente a v14):
-    #   v22-cart-top    +0,05 (z = +0,4; 2.226 requests): poner el mejor carrito primero no se nota. Se puede
-    #                   volver a probar sobre la campeona final si sobra tráfico
-    #   v13-cf-session  +0,02 (z = +0,2; 5.486 requests) y v17-ease +0,02 (z = +0,2; 4.720 requests): empates
-    #   v21-single-retrain -0,23 (z = -1,9) · v18-live -0,16 (z = -1,5) · v8-new-products -0,31 (z = -3,6)
+    "v23-pop-log": 30,      # CAMPEONA desde la 01:12: receta de v14 reentrenada a las 23:15 + popularidad en escala
+                            # logarítmica. +0,24 sobre v14 (z = +2,4; 5.516 requests)
+    "v24-rate": 30,         # receta de v14 reentrenada a la 01:05 + carritos por cada vista del producto (rate_cart)
+    "v25-rate-nonew": 30,   # v24 sin empujón a los productos nuevos (is_new_prod = 0): no convierten más que los antiguos
+    "v20-split-retrain": 10,   # como v23 sin pop_log: mide lo que añade pop_log
+    # Retiradas (conversión esperada del leaderboard, por tramos):
+    #   v14-cf-split    -0,24 frente a v23 (z = -2,4; 5.516 requests): superada por su versión reentrenada
+    #   v22-cart-top    +0,05 frente a v14 (z = +0,4): poner el mejor carrito primero no se nota
+    #   v13-cf-session y v17-ease: empate con v14 · v21, v18, v8: por debajo
     #   v12-cf, v6, v9-organic, v10-sale, v5-cart-first, v4, v7-explore: ver logs/night_report.md
 }
 
